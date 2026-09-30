@@ -61,6 +61,37 @@ class FileStore:
                     files_removed INTEGER NOT NULL DEFAULT 0,
                     errors      INTEGER NOT NULL DEFAULT 0
                 );
+
+                CREATE TABLE IF NOT EXISTS file_actions (
+                    id                  TEXT PRIMARY KEY,
+                    proposal_id         TEXT UNIQUE NOT NULL,
+                    root_id             INTEGER NOT NULL REFERENCES roots(id),
+                    file_id             INTEGER,
+                    kind                TEXT NOT NULL,
+                    source_relative     TEXT NOT NULL,
+                    destination_relative TEXT NOT NULL,
+                    
+                    expected_size        INTEGER,
+                    expected_mtime_ns    INTEGER,
+                    expected_ctime_ns    INTEGER,
+                    expected_dev         INTEGER,
+                    expected_ino         INTEGER,
+                    
+                    post_dev             INTEGER,
+                    post_ino             INTEGER,
+                    post_size            INTEGER,
+                    post_mtime_ns        INTEGER,
+                    
+                    created_at           TEXT NOT NULL,
+                    expires_at           TEXT NOT NULL,
+                    prepared_at          TEXT,
+                    applied_at           TEXT,
+                    undone_at            TEXT,
+                    
+                    status               TEXT NOT NULL,
+                    error                TEXT,
+                    mode                 TEXT NOT NULL
+                );
             """)
 
     @contextmanager
@@ -183,3 +214,34 @@ class FileStore:
                 "newest": [dict(n) for n in newest],
                 "totals": totals
             }
+
+    def save_file_action(self, action: dict) -> None:
+        with self._connect() as db:
+            cols = list(action.keys())
+            places = ", ".join("?" * len(cols))
+            query = f"INSERT INTO file_actions ({', '.join(cols)}) VALUES ({places})"
+            db.execute(query, tuple(action.values()))
+
+    def update_file_action(self, action_id: str, updates: dict) -> None:
+        if not updates:
+            return
+        with self._connect() as db:
+            cols = list(updates.keys())
+            set_clause = ", ".join(f"{c}=?" for c in cols)
+            query = f"UPDATE file_actions SET {set_clause} WHERE id=?"
+            db.execute(query, tuple(updates.values()) + (action_id,))
+
+    def get_file_action(self, action_id: str = None, proposal_id: str = None) -> dict | None:
+        with self._connect() as db:
+            if action_id:
+                row = db.execute("SELECT * FROM file_actions WHERE id=?", (action_id,)).fetchone()
+            elif proposal_id:
+                row = db.execute("SELECT * FROM file_actions WHERE proposal_id=?", (proposal_id,)).fetchone()
+            else:
+                return None
+            return dict(row) if row else None
+            
+    def get_file_actions(self) -> list[dict]:
+        with self._connect() as db:
+            rows = db.execute("SELECT * FROM file_actions ORDER BY created_at DESC LIMIT 100").fetchall()
+            return [dict(row) for row in rows]

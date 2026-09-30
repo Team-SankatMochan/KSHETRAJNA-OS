@@ -102,6 +102,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._json(200, self.server.file_service.get_file_excerpt(file_id))
             except ValueError as e:
                 self._json(400, {"error": str(e)})
+        elif path == "/api/files/actions" and self.server.file_service:
+            self._json(200, {"actions": self.server.file_service.get_action_journal()})
         else:
             self._json(404, {"error": "Not found"})
 
@@ -179,6 +181,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
             elif path == "/api/files/delete-all" and self.server.file_service:
                 self.server.file_service.delete_all()
                 self._json(200, {"deleted": True})
+            elif path == "/api/files/actions/propose" and self.server.file_service:
+                self._json(200, self.server.file_service.create_proposal(body.get("file_id"), body.get("kind"), body.get("destination")))
+            elif path == "/api/files/actions/apply" and self.server.file_service:
+                self._json(200, self.server.file_service.apply_action(body.get("proposal_id")))
+            elif path == "/api/files/actions/undo" and self.server.file_service:
+                self._json(200, self.server.file_service.undo_action(body.get("action_id")))
+            elif path == "/api/files/actions/dismiss" and self.server.file_service:
+                self.server.file_service.dismiss_proposal(body.get("proposal_id"))
+                self._json(200, {"dismissed": True})
             else:
                 self._json(404, {"error": "Not found"})
         except (ValueError, TypeError) as error:

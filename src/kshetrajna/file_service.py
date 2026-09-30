@@ -9,6 +9,7 @@ from .file_storage import FileStore
 from .file_scanner import walk, extract_excerpt, TEXT_EXTENSIONS, SENSITIVE_NAMES, SENSITIVE_EXTENSIONS, SENSITIVE_DIRS, MAX_FILES
 from .file_insights import generate_insights
 from .file_demo import seed_file_demo
+from .file_actions import FileActionManager
 
 PROTECTED_PREFIXES = [
     os.environ.get('SystemRoot', r'C:\Windows').lower(),
@@ -24,6 +25,9 @@ class FileService:
     def __init__(self, store: FileStore, demo: bool = False):
         self.store = store
         self.demo = demo
+        self.action_manager = FileActionManager(store)
+        if not self.demo:
+            self.action_manager.reconcile_actions()
         self._gate = threading.RLock()
         self._scan_thread: threading.Thread | None = None
         self._cancel_events: dict[int, threading.Event] = {}
@@ -327,3 +331,36 @@ class FileService:
             self.store.update_root_status(root_id, "ready")
             self._active_scans.discard(root_id)
             self._cancel_events.pop(root_id, None)
+
+    # --- File Actions ---
+    def _assert_no_scan(self, root_id: int):
+        with self._gate:
+            if root_id in self._active_scans:
+                raise ValueError("Wait for the current scan to finish before changing files.")
+
+    def create_proposal(self, file_id: int, kind: str, destination_relative: str) -> dict:
+        mode = "demo" if self.demo else "live"
+        file_row = self.store.get_file(file_id)
+        if file_row:
+            self._assert_no_scan(file_row["root_id"])
+        return self.action_manager.create_proposal(file_id, kind, destination_relative, mode)
+
+    def apply_action(self, proposal_id: str) -> dict:
+        action = self.store.get_file_action(proposal_id=proposal_id)
+        if action:
+            self._assert_no_scan(action["root_id"])
+        with self._gate:
+            return self.action_manager.apply_action(proposal_id)
+
+    def undo_action(self, action_id: str) -> dict:
+        action = self.store.get_file_action(action_id=action_id)
+        if action:
+            self._assert_no_scan(action["root_id"])
+        with self._gate:
+            return self.action_manager.undo_action(action_id)
+
+    def dismiss_proposal(self, proposal_id: str) -> None:
+        self.action_manager.dismiss_proposal(proposal_id)
+
+    def get_action_journal(self) -> list[dict]:
+        return self.action_manager.get_journal()
