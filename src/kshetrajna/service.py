@@ -59,16 +59,13 @@ class AssistantService:
                             active_ws_dict = ws
                             break
                             
-                all_files = self.file_service.store.get_all_files()
-                insights = self.file_service.get_insights()
+                candidate_files = self.file_service.store.get_candidate_files()
                 contextual_files = surface_contextual_files(
                     model.get("context", "General"),
-                    model.get("rankings", []),
                     active_ws_dict,
                     model.get("workflows", []),
-                    all_files,
-                    insights
-                )
+                    candidate_files
+                )[:8]
 
             return {"mode": "demo" if self.demo else "live", "settings": asdict(self.config.load()),
                     "latest": latest, "history": self.store.history(), "activity": self.store.activity(),

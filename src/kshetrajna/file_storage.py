@@ -163,11 +163,11 @@ class FileStore:
             size = db.execute("SELECT SUM(total_bytes) FROM roots").fetchone()[0] or 0
             return {"total_files": count, "total_bytes": size}
 
-    def get_all_files(self) -> list[dict]:
+    def get_candidate_files(self, limit: int = 250) -> list[dict]:
         with self._connect() as db:
             rows = db.execute(
                 "SELECT id, root_id, relative_path, name, extension, size_bytes, modified_at, mime_guess, excerpt "
-                "FROM files"
+                "FROM files ORDER BY modified_at DESC LIMIT ?", (limit,)
             ).fetchall()
             return [dict(row) for row in rows]
 
