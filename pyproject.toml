@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kshetrajna"
+version = "0.2.0"
+description = "Local adaptive workload intelligence with consent, evaluation, and rollback"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+license = {text = "MIT"}
+authors = [{name = "Kshetrajna contributors"}]
+dependencies = []
+
+[project.scripts]
+kshetrajna = "kshetrajna.__main__:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+kshetrajna = ["web/*"]

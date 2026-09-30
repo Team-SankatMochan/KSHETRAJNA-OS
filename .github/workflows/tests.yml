@@ -1,0 +1,44 @@
+name: Tests
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m unittest discover -s tests -v
+        env:
+          PYTHONPATH: src
+          PYTHONDONTWRITEBYTECODE: "1"
+      - name: Windows device smoke check (no personal history)
+        if: runner.os == 'Windows'
+        run: python -m kshetrajna.diagnostics --live
+        env:
+          PYTHONPATH: src
+          PYTHONDONTWRITEBYTECODE: "1"
+  windows-arm64:
+    # Standard hosted ARM64 runners are available for public repositories.
+    # This job is skipped for private repositories; use check_device.cmd locally.
+    if: ${{ !github.event.repository.private }}
+    runs-on: windows-11-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          architecture: arm64
+      - run: python -m unittest discover -s tests -v
+        env:
+          PYTHONPATH: src
+          PYTHONDONTWRITEBYTECODE: "1"
+      - run: python -m kshetrajna.diagnostics --live --require-native-arm64
+        env:
+          PYTHONPATH: src
+          PYTHONDONTWRITEBYTECODE: "1"

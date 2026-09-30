@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="__CSRF_TOKEN__">
+  <title>Kshetrajna · Adaptive Workload Intelligence</title>
+  <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="/intelligence.css">
+  <script src="/app.js" defer></script>
+  <script src="/intelligence.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">K</span><div><strong>Kshetrajna</strong><small>THE INTELLIGENCE THAT KNOWS THE FIELD</small></div></div>
+      <nav><a href="#insights">Intelligence</a><a href="#decisions">Decisions</a><a href="#privacy">Privacy</a></nav>
+      <div class="status" id="status"><span class="status-dot"></span><span id="status-text">Loading…</span></div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div><p class="eyebrow">PERSONAL WORKLOAD INTELLIGENCE <span class="divider">/</span> LOCAL FIRST</p><h1>Your computer.<br><em>In context.</em></h1><p class="intro">Understand your workflow. See what matters. Approve every adaptation and keep a way back.</p></div>
+        <div class="hero-action"><button id="capture-button" class="primary" disabled>Enable collection</button><button id="export-button" class="secondary">Download session report</button><small>Explainable · Measurable · Under your control</small></div>
+      </section>
+      <section class="mode-banner" aria-label="Data source"><div><strong id="mode-label">Connecting to your local engine</strong><p id="mode-detail">All analysis happens on this device.</p></div><label id="scenario-control" hidden>Demo scenario <select id="scenario"><option>Development</option><option>Meeting</option><option>Creative</option><option>Gaming</option></select></label></section>
+
+      <section class="metrics" aria-label="Current system metrics">
+        <article class="metric"><div class="metric-label">CPU LOAD <span>01</span></div><div class="metric-value" id="cpu">—</div><div class="meter"><i id="cpu-bar"></i></div><p>Share of total processor capacity</p></article>
+        <article class="metric"><div class="metric-label">MEMORY USED <span>02</span></div><div class="metric-value" id="memory">—</div><div class="meter"><i id="memory-bar"></i></div><p id="memory-detail">Physical memory</p></article>
+        <article class="metric"><div class="metric-label">FOREGROUND APP <span>03</span></div><div class="metric-value app-value" id="foreground">—</div><p id="idle">No activity sample yet</p></article>
+      </section>
+
+      <section class="intelligence-grid" id="insights">
+        <article class="panel context-panel"><p class="eyebrow">01 / UNDERSTAND</p><div class="context-heading"><h2 id="context-name">Waiting for data</h2><span class="pill" id="context-confidence">—</span></div><p id="context-explanation" class="control-note"></p><div class="learning-stats"><div><strong id="active-minutes">0</strong><small>active minutes observed</small></div><div><strong id="sample-count">0</strong><small>local samples analyzed</small></div><div><strong id="switch-count">0</strong><small>app switches observed</small></div></div><div class="prediction"><span class="eyebrow">LIKELY NEXT APP</span><strong id="next-app">Gathering observations</strong><small id="next-evidence">Predictions appear after repeated app switches.</small><small id="next-alternatives"></small><p id="prediction-quality" class="control-note"></p></div></article>
+        <article class="panel"><div class="panel-head"><div><p class="eyebrow">02 / PRIORITIZE</p><h2>What matters now</h2></div><span class="pill" id="pressure">Unknown pressure</span></div><div id="rankings" class="rankings"></div><p class="quiet">Importance combines foreground use, frequency, and recency.</p></article>
+      </section>
+      <section class="panel recommendations-panel" id="decisions"><div class="panel-head"><div><p class="eyebrow">03 / PROPOSE</p><h2>Decisions you can inspect</h2></div><span class="quiet">APPROVAL REQUIRED</span></div><div id="recommendations" class="recommendation-grid"></div></section>
+      <section class="grid lower-grid">
+        <article class="panel"><div class="panel-head"><div><p class="eyebrow">04 / ADAPT</p><h2>Your workspace board</h2></div><button id="workspace-reset" class="text-button">Reset board</button></div><p class="control-note">Save the apps that belong together. Activating a board adapts this dashboard; it does not move Windows windows.</p><p class="eyebrow">RECURRING APP GROUPS</p><div id="learned-workflows" class="workflow-list"></div><p class="eyebrow">ORDERED ROUTINES</p><div id="learned-sequences" class="workflow-list"></div><form id="workspace-form"><label class="input-label">Workspace name<input id="workspace-name" maxlength="50" placeholder="My focus workspace" required></label><div id="workspace-choices" class="workspace-choices"></div><button type="submit" class="secondary">Save workspace</button></form><div id="saved-workspaces" class="saved-workspaces"></div><div id="workspace-board" class="workspace-board"></div></article>
+        <article class="panel"><div class="panel-head"><div><p class="eyebrow">05 / EVALUATE &amp; UNDO</p><h2>Decision journal</h2></div><span class="quiet">60-SECOND TRIALS</span></div><p class="control-note">Trials restore the selected process on expiry, pause, or shutdown. Observed changes are not proof of a performance improvement.</p><div id="decision-journal" class="decision-journal"></div></article>
+      </section>
+      <section class="grid">
+        <article class="panel trend-panel"><div class="panel-head"><div><p class="eyebrow">SYSTEM TREND</p><h2>Recent pressure</h2></div><span class="quiet" id="last-seen">No samples</span></div><div class="legend"><span><i class="cpu-key"></i> CPU</span><span><i class="memory-key"></i> Memory</span></div><div class="chart" id="chart" role="img" aria-label="Recent CPU and memory percentages"></div><div class="chart-axis"><span>Older</span><span>Now</span></div></article>
+        <article class="panel"><div class="panel-head"><div><p class="eyebrow">LIVE VIEW</p><h2>Top processes</h2></div><span class="quiet">CPU · WORKING SET</span></div><div class="table-wrap"><table><thead><tr><th>Application</th><th>CPU</th><th>RAM</th></tr></thead><tbody id="processes"><tr><td colspan="3" class="empty">No process samples yet.</td></tr></tbody></table></div></article>
+      </section>
+
+      <section class="grid lower-grid">
+        <article class="panel"><div class="panel-head"><div><p class="eyebrow">LOCAL HISTORY</p><h2>Activity changes</h2></div><span class="quiet">RECENT EVENTS</span></div><div id="activity" class="activity-list"><p class="empty">No activity events yet.</p></div></article>
+        <article class="panel controls-panel" id="privacy"><div class="panel-head"><div><p class="eyebrow">YOUR DATA</p><h2>Privacy controls</h2></div></div>
+          <p class="control-note">Only app executable names, process IDs, CPU and memory figures, foreground switches, and idle duration are recorded. No window titles, files, URLs, or keystrokes.</p>
+          <form id="settings-form">
+            <label class="toggle-row"><span><strong>Process samples</strong><small>Save top application resource use</small></span><input type="checkbox" name="track_processes"></label>
+            <label class="toggle-row"><span><strong>Foreground activity</strong><small>Save app switches and idle transitions</small></span><input type="checkbox" name="track_foreground"></label>
+            <label class="toggle-row"><span><strong>Allow live priority trials</strong><small>Off by default. Each trial still needs explicit approval.</small></span><input type="checkbox" name="allow_priority_changes"></label>
+            <div class="field-grid"><label>Sample every<select name="sample_interval_seconds"><option value="2">2 seconds</option><option value="5">5 seconds</option><option value="10">10 seconds</option><option value="30">30 seconds</option><option value="60">60 seconds</option></select></label><label>Keep history<select name="retention_days"><option value="1">1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option></select></label></div>
+            <div class="control-actions"><button type="submit" class="secondary">Save preferences</button><button type="button" id="delete-button" class="danger">Delete recorded history</button></div>
+          </form>
+          <p class="feedback" id="feedback" role="status"></p>
+        </article>
+      </section>
+      <footer><span>KSHETRAJNA / HACKATHON PROTOTYPE v0.2</span><span>LOCAL INTELLIGENCE · EXPLICIT CONSENT · AUDITABLE ACTIONS</span></footer>
+    </main>
+  </div>
+  <dialog id="approval-dialog"><p class="eyebrow">REVIEW BEFORE APPROVAL</p><h2 id="approval-title"></h2><p id="approval-reason"></p><div id="approval-effect" class="approval-effect"></div><p id="approval-mode" class="control-note"></p><p class="control-note">Undo is available in the journal. A live trial restores this PID only; newly spawned child processes may inherit its priority. If the app crashes, restart it to attempt recovery.</p><div class="control-actions"><button id="confirm-trial" class="primary">Approve 60-second trial</button><button id="cancel-trial" class="secondary">Cancel</button></div></dialog>
+  <div id="toast" role="status" hidden></div>
+</body>
+</html>
