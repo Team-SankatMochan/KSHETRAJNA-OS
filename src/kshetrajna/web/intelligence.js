@@ -58,6 +58,25 @@ function renderIntelligence(state) {
     ranks.append(row);
   }
   if (!model.rankings.length) ranks.append(element('p', 'App importance will appear as observations arrive.', 'empty'));
+  
+  const filesSection = $('contextual-files-section');
+  const filesList = $('contextual-files');
+  if (state.contextual_files && state.contextual_files.length > 0) {
+    filesSection.hidden = false;
+    filesList.replaceChildren();
+    for (const cf of state.contextual_files) {
+      const el = element('div');
+      const label = element('small', cf.label.replace(/_/g, ' '), 'pill');
+      el.append(element('strong', cf.title), element('br'), label, element('br'), element('small', 'because: ' + cf.reasons.join(', ')));
+      filesList.append(el);
+    }
+    const viewLink = element('a', '[View in Files]');
+    viewLink.href = '#files';
+    filesList.append(element('div').appendChild(viewLink).parentNode);
+  } else {
+    filesSection.hidden = true;
+  }
+  
   const recommendations = $('recommendations');
   const signature = JSON.stringify([state.recommendations.map(p => p.id), state.active_actions.length, state.settings.enabled]);
   if (recommendations.dataset.signature !== signature) {

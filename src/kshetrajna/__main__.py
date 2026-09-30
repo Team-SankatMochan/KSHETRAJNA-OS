@@ -65,6 +65,7 @@ def main() -> int:
     try:
         server = DashboardServer(port, collector, config, store, demo=args.demo)
         server.file_service = file_service
+        server.service.file_service = file_service
     except OSError as error:
         parser.error(f"Could not open dashboard: {error}")
     server.service.restore_all()

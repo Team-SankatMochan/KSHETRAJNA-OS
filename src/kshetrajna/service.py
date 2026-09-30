@@ -13,8 +13,9 @@ from .maintenance import MaintenanceService
 
 
 class AssistantService:
-    def __init__(self, collector, config, store, *, demo=False, driver=None):
+    def __init__(self, collector, config, store, *, demo=False, driver=None, file_service=None):
         self.collector, self.config, self.store = collector, config, store
+        self.file_service = file_service
         self.demo = demo
         self.driver = driver or (SimulatedPriorityDriver() if demo else None)
         self.active_workspace = None
@@ -47,12 +48,35 @@ class AssistantService:
                           if d["status"] == "dismissed" or d.get("feedback") == "not_helpful"}
             active = self.store.pending_decisions()
             proposals = [p for p in recommend(latest, model) if p["id"] not in suppressed]
+            
+            contextual_files = []
+            if self.file_service and getattr(self.file_service, "store", None):
+                from .context_files import surface_contextual_files
+                active_ws_dict = None
+                if self.active_workspace:
+                    for ws in self.store.workspaces():
+                        if ws["name"] == self.active_workspace:
+                            active_ws_dict = ws
+                            break
+                            
+                all_files = self.file_service.store.get_all_files()
+                insights = self.file_service.get_insights()
+                contextual_files = surface_contextual_files(
+                    model.get("context", "General"),
+                    model.get("rankings", []),
+                    active_ws_dict,
+                    model.get("workflows", []),
+                    all_files,
+                    insights
+                )
+
             return {"mode": "demo" if self.demo else "live", "settings": asdict(self.config.load()),
                     "latest": latest, "history": self.store.history(), "activity": self.store.activity(),
                     "intelligence": model, "recommendations": proposals, "decisions": decisions,
                     "maintenance": self.maintenance.offers(),
                     "active_actions": active, "workspaces": self.store.workspaces(),
                     "active_workspace": self.active_workspace,
+                    "contextual_files": contextual_files,
                     "health": {"last_error": self.collector.last_error,
                                "last_sample_at": self.collector.last_sample_at}}
 
