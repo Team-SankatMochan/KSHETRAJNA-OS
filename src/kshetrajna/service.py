@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from .actions import SimulatedPriorityDriver, WindowsPriorityDriver
 from .demo import SCENARIOS, seed_demo
 from .intelligence import analyze, recommend
+from .maintenance import MaintenanceService
 
 
 class AssistantService:
@@ -18,6 +19,7 @@ class AssistantService:
         self.driver = driver or (SimulatedPriorityDriver() if demo else None)
         self.active_workspace = None
         self._clock = time.time
+        self.maintenance = MaintenanceService(collector, config, store, demo=demo)
 
     def _driver(self):
         if self.driver is None:
@@ -48,6 +50,7 @@ class AssistantService:
             return {"mode": "demo" if self.demo else "live", "settings": asdict(self.config.load()),
                     "latest": latest, "history": self.store.history(), "activity": self.store.activity(),
                     "intelligence": model, "recommendations": proposals, "decisions": decisions,
+                    "maintenance": self.maintenance.offers(),
                     "active_actions": active, "workspaces": self.store.workspaces(),
                     "active_workspace": self.active_workspace,
                     "health": {"last_error": self.collector.last_error,
@@ -171,6 +174,7 @@ class AssistantService:
         with self.collector._gate:
             self.restore_all()
             self.store.clear()
+            self.maintenance.plans.clear()
             self.active_workspace = None
             self.collector.probe.scenario = scenario
             self.collector.probe.index = 0
@@ -182,6 +186,7 @@ class AssistantService:
             if self.store.pending_decisions():
                 raise ValueError("A restore is pending. Its recovery record must be kept until restoration completes.")
             self.collector.delete_history()
+            self.maintenance.plans.clear()
             self.active_workspace = None
 
     def report(self):

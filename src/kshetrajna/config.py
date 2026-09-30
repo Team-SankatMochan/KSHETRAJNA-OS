@@ -23,6 +23,7 @@ class Settings:
     track_foreground: bool = True
     idle_threshold_seconds: int = 60
     allow_priority_changes: bool = False
+    allow_maintenance: bool = False
 
     @classmethod
     def from_dict(cls, value: dict) -> "Settings":
@@ -32,7 +33,7 @@ class Settings:
         if set(value) - allowed:
             raise ValueError("Unknown setting")
         merged = {**asdict(cls()), **value}
-        for key in ("enabled", "track_processes", "track_foreground", "allow_priority_changes"):
+        for key in ("enabled", "track_processes", "track_foreground", "allow_priority_changes", "allow_maintenance"):
             if type(merged[key]) is not bool:
                 raise ValueError(f"{key} must be a boolean")
         bounds = {

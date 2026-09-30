@@ -160,6 +160,14 @@ function renderDecisions(state) {
   journal.replaceChildren();
   for (const decision of state.decisions.slice(0, 8)) {
     const item = element('article', null, 'journal-entry');
+    if (decision.kind === 'maintenance') {
+      item.append(element('span', (decision.mode === 'demo' ? 'SIMULATED / ' : '') + decision.status.replaceAll('_', ' ').toUpperCase(), 'eyebrow'),
+        element('strong', decision.title), element('small', timeLabel(decision.created_at)),
+        element('p', decision.result?.message || 'Outcome not recorded.', 'control-note'));
+      if (decision.result?.resident_reduction_mb != null) item.append(element('p', 'Immediate resident-memory reduction: ' + decision.result.resident_reduction_mb + ' MiB. This may be temporary.', 'control-note'));
+      journal.append(item);
+      continue;
+    }
     const active = ['active', 'prepared', 'restore_failed'].includes(decision.status);
     item.append(element('span', (decision.mode === 'demo' ? 'SIMULATED · ' : '') + decision.status.replaceAll('_', ' ').toUpperCase(), 'eyebrow'));
     item.append(element('strong', decision.plan ? decision.plan.name + ' · CPU priority' : 'Recommendation dismissed'));

@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/intelligence.css">
   <script src="/app.js" defer></script>
   <script src="/intelligence.js" defer></script>
+  <script src="/maintenance.js" defer></script>
 </head>
 <body>
   <div class="shell">
@@ -36,6 +37,7 @@
         <article class="panel"><div class="panel-head"><div><p class="eyebrow">02 / PRIORITIZE</p><h2>What matters now</h2></div><span class="pill" id="pressure">Unknown pressure</span></div><div id="rankings" class="rankings"></div><p class="quiet">Importance combines foreground use, frequency, and recency.</p></article>
       </section>
       <section class="panel recommendations-panel" id="decisions"><div class="panel-head"><div><p class="eyebrow">03 / PROPOSE</p><h2>Decisions you can inspect</h2></div><span class="quiet">APPROVAL REQUIRED</span></div><div id="recommendations" class="recommendation-grid"></div></section>
+      <section class="panel recommendations-panel" id="maintenance"><div class="panel-head"><div><p class="eyebrow">SYSTEM TOOLS</p><h2>Windows maintenance</h2></div><span id="maintenance-status" class="quiet">REVIEW EACH ACTION</span></div><p class="control-note">Storage cleanup removes disk files. Memory trimming changes resident pages and may slow an app. Each action explains its scope and whether it can be undone. Windows cleanup tools ask you to choose what to remove.</p><div id="maintenance-actions" class="recommendation-grid"></div></section>
       <section class="grid lower-grid">
         <article class="panel"><div class="panel-head"><div><p class="eyebrow">04 / ADAPT</p><h2>Your workspace board</h2></div><button id="workspace-reset" class="text-button">Reset board</button></div><p class="control-note">Save the apps that belong together. Activating a board adapts this dashboard; it does not move Windows windows.</p><p class="eyebrow">RECURRING APP GROUPS</p><div id="learned-workflows" class="workflow-list"></div><p class="eyebrow">ORDERED ROUTINES</p><div id="learned-sequences" class="workflow-list"></div><form id="workspace-form"><label class="input-label">Workspace name<input id="workspace-name" maxlength="50" placeholder="My focus workspace" required></label><div id="workspace-choices" class="workspace-choices"></div><button type="submit" class="secondary">Save workspace</button></form><div id="saved-workspaces" class="saved-workspaces"></div><div id="workspace-board" class="workspace-board"></div></article>
         <article class="panel"><div class="panel-head"><div><p class="eyebrow">05 / EVALUATE &amp; UNDO</p><h2>Decision journal</h2></div><span class="quiet">60-SECOND TRIALS</span></div><p class="control-note">Trials restore the selected process on expiry, pause, or shutdown. Observed changes are not proof of a performance improvement.</p><div id="decision-journal" class="decision-journal"></div></article>
@@ -53,6 +55,7 @@
             <label class="toggle-row"><span><strong>Process samples</strong><small>Save top application resource use</small></span><input type="checkbox" name="track_processes"></label>
             <label class="toggle-row"><span><strong>Foreground activity</strong><small>Save app switches and idle transitions</small></span><input type="checkbox" name="track_foreground"></label>
             <label class="toggle-row"><span><strong>Allow live priority trials</strong><small>Off by default. Each trial still needs explicit approval.</small></span><input type="checkbox" name="allow_priority_changes"></label>
+            <label class="toggle-row"><span><strong>Allow Windows maintenance</strong><small>Review each tool launch, Store cache reset or background memory trim. Some actions have no undo.</small></span><input type="checkbox" name="allow_maintenance"></label>
             <div class="field-grid"><label>Sample every<select name="sample_interval_seconds"><option value="2">2 seconds</option><option value="5">5 seconds</option><option value="10">10 seconds</option><option value="30">30 seconds</option><option value="60">60 seconds</option></select></label><label>Keep history<select name="retention_days"><option value="1">1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option></select></label></div>
             <div class="control-actions"><button type="submit" class="secondary">Save preferences</button><button type="button" id="delete-button" class="danger">Delete recorded history</button></div>
           </form>
@@ -63,6 +66,7 @@
     </main>
   </div>
   <dialog id="approval-dialog"><p class="eyebrow">REVIEW BEFORE APPROVAL</p><h2 id="approval-title"></h2><p id="approval-reason"></p><div id="approval-effect" class="approval-effect"></div><p id="approval-mode" class="control-note"></p><p class="control-note">Undo is available in the journal. A live trial restores this PID only; newly spawned child processes may inherit its priority. If the app crashes, restart it to attempt recovery.</p><div class="control-actions"><button id="confirm-trial" class="primary">Approve 60-second trial</button><button id="cancel-trial" class="secondary">Cancel</button></div></dialog>
+  <dialog id="maintenance-dialog"><p class="eyebrow">REVIEW SYSTEM ACTION</p><h2 id="maintenance-title"></h2><p id="maintenance-effect"></p><p id="maintenance-undo" class="approval-effect"></p><p id="maintenance-mode" class="control-note"></p><div class="control-actions"><button id="maintenance-confirm" class="primary">Approve this action</button><button id="maintenance-cancel" class="secondary">Cancel</button></div></dialog>
   <div id="toast" role="status" hidden></div>
 </body>
 </html>

@@ -42,13 +42,13 @@ class WindowsPriorityDriver:
             raise ctypes.WinError(ctypes.get_last_error())
         return value.value
 
-    def _open_verified(self, target):
+    def _open_verified(self, target, access=0x1200):
         if (target["name"].casefold() not in PRIORITY_ALLOWLIST or
                 target["pid"] in (0, 4, os.getpid()) or not target.get("created_ticks")):
             raise ValueError("Target is outside the permitted application list")
         if self._session(target["pid"]) != self._session(os.getpid()):
             raise ValueError("Only this interactive session is eligible")
-        handle = self.probe.open_process(0x1200, False, target["pid"])
+        handle = self.probe.open_process(access, False, target["pid"])
         if not handle:
             raise ctypes.WinError(ctypes.get_last_error())
         try:

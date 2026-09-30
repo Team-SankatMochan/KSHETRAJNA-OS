@@ -65,6 +65,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                   "/app.css": ("app.css", "text/css; charset=utf-8"),
                   "/app.js": ("app.js", "text/javascript; charset=utf-8"),
                   "/intelligence.js": ("intelligence.js", "text/javascript; charset=utf-8"),
+                  "/maintenance.js": ("maintenance.js", "text/javascript; charset=utf-8"),
                   "/intelligence.css": ("intelligence.css", "text/css; charset=utf-8")}
         if path in assets:
             name, content_type = assets[path]
@@ -116,6 +117,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             elif path == "/api/delete":
                 service.delete_history()
                 self._json(200, {"deleted": True})
+            elif path == "/api/maintenance/preview":
+                self._json(200, {"plan": service.maintenance.preview(body.get("id"))})
+            elif path == "/api/maintenance/execute":
+                self._json(200, {"decision": service.maintenance.execute(body.get("id"))})
             elif path == "/api/actions/approve":
                 self._json(200, {"decision": service.approve(body.get("id"))})
             elif path == "/api/actions/undo":
