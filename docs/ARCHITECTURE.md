@@ -6,7 +6,7 @@
 flowchart LR
   W[Win32 read APIs] --> C[Consent-gated collector]
   D[Synthetic demo probe] --> C
-  C --> S[(Local SQLite)]
+  C --> S[(Local SQLite events.db)]
   S --> I[Explainable context and patterns]
   I --> R[Recommendations]
   R --> U[User review]
@@ -16,6 +16,10 @@ flowchart LR
   E --> F[Feedback and undo]
   F --> S
   I --> B[Saved dashboard workspace board]
+  
+  FS[File Scanner] --> DB2[(Local SQLite files.db)]
+  DB2 --> FI[File Insights & Search]
+  FI --> DB[Dashboard]
 ~~~
 
 ## Technology decisions
@@ -25,6 +29,7 @@ flowchart LR
 | CPython 3.13 | Available on Windows x64 and ARM64; readable, fast to iterate, standard SQLite and FFI | Native ARM64 installer is experimental; Python runtime must be installed |
 | Win32 via ctypes | Direct read APIs and a narrow priority actuator without native wheel dependencies | ABI declarations require care; protected processes may be inaccessible |
 | SQLite and explicit transactions | Durable local history, journal-before-write, simple schema upgrade | Per-user plaintext database; no encrypted-at-rest guarantee |
+| Separate files.db (WAL mode) | Isolates file scanning from recovery journal; supports concurrent read/write | Two databases to manage |
 | Standard-library HTTP server | Zero dependencies and a single local process | Loopback prototype only; not a production Internet server |
 | Plain HTML/CSS/JS/SVG | Offline assets, no npm install, accessible semantic controls | DOM updates need care to preserve input and focus |
 | Rule/context + counts | Each result has inspectable evidence; no cloud or model download | App-name categories miss unknown or ambiguous workflows |
@@ -53,12 +58,20 @@ Rollback applies to the selected process. Children created while its priority is
 
 ## Privacy and trust boundaries
 
-- Live and synthetic demo storage are separate. Demo storage is temporary; demo never instantiates the native action driver.
+- Live and synthetic demo storage are separate. Demo storage is temporary; demo never instantiates the native action driver or accesses the filesystem for file intelligence.
 - The service binds only 127.0.0.1. Exact Host checks reject ordinary DNS rebinding. Mutations require matching Origin and a random page-session token.
 - API bodies are bounded to 4096 bytes; transfer encoding is rejected. The UI uses textContent for app names and user workspace labels.
 - SQLite schema migration adds process identity tokens to existing Phase 1 databases. Old rows have token zero and cannot create actionable native proposals.
 - Retention runs during both enabled and paused collection. Pending recovery records are exempt so deletion cannot discard the path to restoration.
 - A local program running as the same user can access the user's files/service. This is not an adversarial multi-user security boundary.
+
+## File Intelligence contract
+
+- **Opt-in Roots:** Scanning is restricted to user-approved root directories. System paths, `C:\`, and Kshetrajna's own data directory are rejected. Network (UNC) paths are not supported.
+- **Path Security:** The browser never sends an absolute path after root creation. All API endpoints use opaque integer IDs. Scanner logic enforces containment using `Path.resolve().is_relative_to()`.
+- **Reparse Points:** Symlinks, junctions, volume mount points, and OneDrive cloud placeholders (`FILE_ATTRIBUTE_REPARSE_POINT`) are strictly ignored to prevent traversal and unintended cloud downloads.
+- **Bounded Extraction:** Only listed plain-text file extensions have their contents extracted, strictly bounded to 4KB, sanitized of control characters. Known sensitive filenames (`.env`, `id_rsa`) are cataloged but their contents are never extracted.
+- **Independence:** Removing File Intelligence data (`files.db`) does not interact with or compromise the System Intelligence recovery journal (`events.db`).
 
 ## Outcome interpretation
 

@@ -1,3 +1,3 @@
-"""Kshetrajna Phase 1: local, observe-only Windows telemetry."""
+"""Kshetrajna Phase A: System and File Intelligence."""
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

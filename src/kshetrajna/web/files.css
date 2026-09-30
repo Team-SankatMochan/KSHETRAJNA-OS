@@ -1,0 +1,90 @@
+/* File Intelligence Styles */
+
+#files {
+  margin-top: 2rem;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 2rem;
+}
+
+#roots-list {
+  margin-bottom: 1rem;
+}
+
+.root-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+}
+
+.root-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.root-path {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.root-status {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 12px;
+  background: var(--bg-subtle);
+  margin-left: 0.5rem;
+}
+
+.root-status.scanning { color: #f0c050; }
+.root-status.ready { color: #80e080; }
+.root-status.error { color: #f08080; }
+
+.search-result {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.search-result:last-child {
+  border-bottom: none;
+}
+
+.search-result h4 {
+  margin: 0 0 0.25rem 0;
+  font-size: 0.95rem;
+}
+
+.search-result .path {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.search-result .excerpt {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  padding: 0.5rem;
+  border-radius: 4px;
+  max-height: 4.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre-wrap;
+}
+
+.insight-tag {
+  display: inline-block;
+  font-size: 0.75rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  padding: 0.1rem 0.4rem;
+  border-radius: 12px;
+  margin-right: 0.25rem;
+  margin-top: 0.25rem;
+}

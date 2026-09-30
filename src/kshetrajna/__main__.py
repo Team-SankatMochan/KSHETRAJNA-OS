@@ -15,6 +15,9 @@ from .storage import EventStore
 from .telemetry import WindowsProbe
 from .demo import DemoProbe, seed_demo
 from .instance import InstanceLock
+from .file_storage import FileStore
+from .file_service import FileService
+from .file_demo import seed_file_demo
 
 
 def main() -> int:
@@ -52,12 +55,16 @@ def main() -> int:
     except (OSError, ValueError) as error:
         parser.error(f"Settings could not be loaded: {error}")
     store = EventStore(directory / "events.db")
+    file_store = FileStore(directory / "files.db")
     probe = DemoProbe() if args.demo else WindowsProbe()
     if args.demo:
         seed_demo(store, probe)
+        seed_file_demo(file_store)
+    file_service = FileService(file_store, demo=args.demo)
     collector = Collector(probe, config, store)
     try:
         server = DashboardServer(port, collector, config, store, demo=args.demo)
+        server.file_service = file_service
     except OSError as error:
         parser.error(f"Could not open dashboard: {error}")
     server.service.restore_all()

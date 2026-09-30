@@ -19,6 +19,7 @@ class DashboardServer(ThreadingHTTPServer):
         self.store = store
         self.token = secrets.token_urlsafe(32)
         self.service = AssistantService(collector, config, store, demo=demo)
+        self.file_service = None
         collector.service = self.service
         super().__init__(("127.0.0.1", port), DashboardHandler)
 
@@ -66,7 +67,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                   "/app.js": ("app.js", "text/javascript; charset=utf-8"),
                   "/intelligence.js": ("intelligence.js", "text/javascript; charset=utf-8"),
                   "/maintenance.js": ("maintenance.js", "text/javascript; charset=utf-8"),
-                  "/intelligence.css": ("intelligence.css", "text/css; charset=utf-8")}
+                  "/files.js": ("files.js", "text/javascript; charset=utf-8"),
+                  "/intelligence.css": ("intelligence.css", "text/css; charset=utf-8"),
+                  "/files.css": ("files.css", "text/css; charset=utf-8")}
         if path in assets:
             name, content_type = assets[path]
             body = (files("kshetrajna") / "web" / name).read_bytes()
@@ -77,6 +80,28 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._json(200, self.server.service.state())
         elif path == "/api/report":
             self._json(200, self.server.service.report())
+        elif path == "/api/files/state" and self.server.file_service:
+            self._json(200, self.server.file_service.state())
+        elif path.startswith("/api/files/root/") and self.server.file_service:
+            try:
+                root_id = int(path.split("/")[-1])
+                self._json(200, self.server.file_service.get_root_details(root_id))
+            except ValueError as e:
+                self._json(400, {"error": str(e)})
+        elif path == "/api/files/search" and self.server.file_service:
+            from urllib.parse import parse_qs
+            qs = parse_qs(urlsplit(self.path).query)
+            q = qs.get("q", [""])[0]
+            root_id = int(qs.get("root_id", [0])[0]) if "root_id" in qs else None
+            self._json(200, self.server.file_service.search(q, root_id))
+        elif path == "/api/files/insights" and self.server.file_service:
+            self._json(200, self.server.file_service.get_insights())
+        elif path.startswith("/api/files/file/") and path.endswith("/excerpt") and self.server.file_service:
+            try:
+                file_id = int(path.split("/")[-2])
+                self._json(200, self.server.file_service.get_file_excerpt(file_id))
+            except ValueError as e:
+                self._json(400, {"error": str(e)})
         else:
             self._json(404, {"error": "Not found"})
 
@@ -140,6 +165,20 @@ class DashboardHandler(BaseHTTPRequestHandler):
             elif path == "/api/demo/scenario":
                 service.change_scenario(body.get("scenario"))
                 self._json(200, {"changed": True})
+            elif path == "/api/files/roots/add" and self.server.file_service:
+                self._json(200, self.server.file_service.add_root(body.get("path"), body.get("label", "")))
+            elif path == "/api/files/roots/rescan" and self.server.file_service:
+                self.server.file_service.rescan_root(body.get("root_id"))
+                self._json(200, {"rescanned": True})
+            elif path == "/api/files/roots/cancel-scan" and self.server.file_service:
+                self.server.file_service.cancel_scan(body.get("root_id"))
+                self._json(200, {"cancelled": True})
+            elif path == "/api/files/roots/remove" and self.server.file_service:
+                self.server.file_service.remove_root(body.get("root_id"))
+                self._json(200, {"removed": True})
+            elif path == "/api/files/delete-all" and self.server.file_service:
+                self.server.file_service.delete_all()
+                self._json(200, {"deleted": True})
             else:
                 self._json(404, {"error": "Not found"})
         except (ValueError, TypeError) as error:

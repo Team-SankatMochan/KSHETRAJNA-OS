@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kshetrajna"
-version = "0.2.0"
-description = "Local adaptive workload intelligence with consent, evaluation, and rollback"
+version = "0.3.0"
+description = "Local adaptive workload and file intelligence with consent, evaluation, and rollback"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 license = {text = "MIT"}

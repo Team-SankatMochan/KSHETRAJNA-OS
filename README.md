@@ -2,7 +2,7 @@
 
 > **The intelligence that knows the field.**
 
-A local Windows workload assistant that observes app activity, recognizes workflows, explains resource recommendations, asks for consent, and records outcomes and rollback. This is the end-to-end hackathon prototype, version 0.2.
+A local Windows workload and file assistant that observes app activity, indexes local files, recognizes workflows, explains resource recommendations, asks for consent, and records outcomes and rollback. This is the end-to-end hackathon prototype, version 0.3.
 
 ## Run the submission now
 
@@ -24,6 +24,7 @@ Read [SUBMISSION.md](SUBMISSION.md) for a 90-second demo script and copy-ready p
 | 4 · Adapt with consent | Review/approve/dismiss, optional 60-second live Normal → Below normal priority trial, saved workspace boards within the dashboard. |
 | 5 · Evaluate and reverse | Durable decision journal, manual and timed undo, pause/shutdown restoration, startup recovery, observed before/after deltas, feedback that suppresses unwanted suggestions. |
 | 6 · Demonstrate and verify | Four synthetic scenarios, JSON report download, launch scripts, regression tests, Windows/Linux CI definition, submission guide. |
+| 7 · File Intelligence | Phase A: local file indexing, bounded excerpts, keyword search, basic metadata insights, separate files.db, robust security against path traversal and symlinks. |
 
 ## Important boundaries
 
@@ -80,7 +81,12 @@ src/kshetrajna/
   instance.py        one live process per data directory
   demo.py            isolated synthetic scenarios
   server.py          loopback HTTP boundary
-  web/               dashboard and workspace board
+  file_storage.py    SQLite file catalog (files.db)
+  file_scanner.py    bounded filesystem walker
+  file_insights.py   deterministic file metadata
+  file_service.py    file API and orchestration
+  file_demo.py       synthetic file data
+  web/               dashboard, workspace board, and file inbox
 tests/               behavior and API regression tests
 docs/                architecture and original vision
 ~~~
