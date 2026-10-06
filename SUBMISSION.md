@@ -8,7 +8,7 @@ The demo is deliberately labeled synthetic. It contains fifteen minutes of recur
 
 ## Project description
 
-Kshetrajna is a privacy-first adaptive workload assistant for Windows. It observes local application activity and resource pressure, builds an explainable picture of the current workflow, and proposes changes the user can inspect and approve. Every supported adaptation has a visible journal and a route back. The prototype connects telemetry, local behavioral statistics, recommendations, a workspace board, consent, controlled CPU-priority trials, outcome measurement, and rollback in one offline application. It is designed around Windows on ARM compatibility using native Win32 APIs and Python without third-party runtime dependencies.
+Kshetrajna is a privacy-first adaptive workload assistant for Windows. It observes local application activity and resource pressure, builds an explainable picture of the current workflow, and proposes changes the user can inspect and approve. Reversible priority trials have a visible journal and a route back; separate Windows maintenance tools are explicitly labeled when they have no automatic undo. The prototype connects telemetry, local behavioral statistics, recommendations, a workspace board, consent, controlled CPU-priority trials, outcome measurement, file indexing, and file-action recovery in one offline application. It is designed around Windows on ARM compatibility using native Win32 APIs and Python without third-party runtime dependencies.
 
 ## A 90-second demonstration
 
@@ -17,11 +17,11 @@ Kshetrajna is a privacy-first adaptive workload assistant for Windows. It observ
 3. **0:30–0:45 — Review a proposal.** Select Review simulated trial. Read the target, reason, tradeoff, and duration. Approve it. The decision journal now shows a simulated active trial.
 4. **0:45–1:00 — Adapt the workspace board.** Name a workspace, choose apps, save it, and activate it. The app board changes. This is dashboard adaptation; it does not move desktop windows.
 5. **1:00–1:15 — Close the loop.** Select Undo now, or let the 60-second trial finish. Show the journal and give Helpful or Not helpful feedback. With at least three post-approval samples, the journal shows observed metric deltas without claiming causation.
-6. **1:15–1:30 — Show a new context.** Select Meeting or Creative from Demo scenario. The context and app priorities update. Finish with the privacy controls and Download session report.
+6. **1:15–1:30 — Show a new context.** Select Meeting or Creative from Demo scenario. The context and app priorities update. Finish with the privacy controls, the reviewed Sort AI panel, and Download session report.
 
 ## What makes the prototype useful
 
-The contribution is the complete interaction: evidence → recommendation → explicit approval → bounded trial → observation → rollback → feedback. Each individual mechanism already has precedents; the submission demonstrates how they can work together as a local, user-controlled Windows layer.
+The contribution is the complete interaction: evidence → recommendation → explicit approval → bounded trial → observation → rollback → feedback, alongside approved-folder indexing → deterministic file suggestions → editable batch preview → conflict-aware mutation → undo. Each individual mechanism already has precedents; the submission demonstrates how they can work together as a local, user-controlled Windows layer.
 
 ## Judge questions
 
@@ -31,11 +31,11 @@ The contribution is the complete interaction: evidence → recommendation → ex
 
 **Does it improve performance?** No causal benchmark is claimed. The prototype records observations around a trial. Controlled A/B experiments and a latency metric are needed before making a performance claim.
 
-**What can it change?** With live opt-in and approval, it can temporarily lower one eligible background process from Normal to Below normal priority. The default mode observes only. Workspace boards change the dashboard UI.
+**What can it change?** With live opt-in and approval, it can temporarily lower one eligible background process from Normal to Below normal priority. With a separate maintenance opt-in, it can launch selected Windows cleanup tools, review/delete bounded old `%TEMP%` candidates, or request a one-process working-set trim; those actions may be irreversible and are not presented as performance guarantees. The default mode observes only. Workspace boards change the dashboard UI. Sort AI file moves are deterministic proposals that require per-batch review and are conflict-checked before mutation.
 
 **How does rollback work?** The original state is journaled before mutation, then restored on undo/expiry, pause, or graceful shutdown. Startup retries pending records after a crash. It never overwrites a priority class changed by another actor. Descendants are outside the selected-process rollback scope.
 
-**What about Snapdragon X?** The code uses standard Win32 APIs and has no third-party native wheels. A native ARM64 Python runtime is available, but ARM64 hardware qualification has not been performed here.
+**What about Snapdragon X?** The code uses standard Win32 APIs and has no third-party native wheels. The supplied project brief reports a user-confirmed 61-test run on an HP Snapdragon X ARM64 laptop. The current checkout's reproducible device report is x64, so the ARM64 claim is retained as a user-provided validation statement rather than independently reproduced here; native diagnostics and real priority actuation still require device qualification.
 
 ## Submission contents
 
@@ -43,7 +43,10 @@ The contribution is the complete interaction: evidence → recommendation → ex
 - README.md: quickstart, implemented phases, and limitations.
 - docs/ARCHITECTURE.md: technology choices and contracts.
 - PHASE1.md: the earlier observe-only foundation design, retained as historical context.
-- tests/: executable regression tests.
-- .github/workflows/tests.yml: CI configuration for Windows and Linux unit/demo tests.
+- tests/: executable regression tests (80 total: 78 passed and 2 platform-specific skips in the Linux integration run).
+- .github/workflows/tests.yml: CI configuration for Windows and Linux unit/demo tests, with a conditional native ARM64 job when repository visibility and runner availability permit it.
 
-Submit the repository using the hackathon's required channel. No deployment, GitHub push, or external submission has been performed by this build.
+The current integration is an experimental Git snapshot for later device
+testing. Submit a release only after completing the device checks. Historical
+pitch and description files are retained under `submission/`; they describe
+the earlier prototype rather than this integration's qualification status.

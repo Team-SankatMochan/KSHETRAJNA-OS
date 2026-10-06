@@ -11,6 +11,11 @@ SCAN_BATCH_SIZE = 200
 
 FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 
+
+class ScanTruncated(Exception):
+    """Raised when a scan reaches the maximum number of files."""
+
+
 TEXT_EXTENSIONS = frozenset({
     'txt', 'md', 'csv', 'json', 'log', 'py', 'js', 'ts', 'html',
     'css', 'yaml', 'yml', 'toml', 'jsx', 'tsx'
@@ -94,6 +99,6 @@ def walk(root: Path, is_cancelled: Callable[[], bool] = lambda: False) -> Genera
             else:
                 seen_count += 1
                 if seen_count > MAX_FILES:
-                    # Truncate scan
-                    return
+                    # Do not silently turn a partial index into a successful scan.
+                    raise ScanTruncated
                 yield (relative, entry, info)

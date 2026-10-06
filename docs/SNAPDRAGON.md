@@ -10,15 +10,15 @@ Target: **Windows 11 on ARM64, native CPython 3.13.x ARM64** (standard GIL build
 | SQLite, local HTTP, dashboard | Standard library and static assets | API/storage tests; included in ARM64 Python |
 | CPU/RAM/process/activity telemetry | Uses desktop Win32 APIs, no x64-only extensions | Explicit function signatures and pointer-sized HANDLE/SIZE_T; validate on your device |
 | Windows structures | Expected LLP64 layouts on x64/ARM64 | Device check asserts FILETIME 8, LASTINPUTINFO 8, MEMORYSTATUSEX 64, PROCESS_MEMORY_COUNTERS 72 bytes |
-| Native priority trials | Opt-in, user-approved, off by default | Logic tested with doubles; real ARM64 actuation not qualified |
+| Native priority trials | Opt-in, user-approved, off by default | Logic tested with doubles; real ARM64 actuation not independently qualified |
 | Qualcomm NPU | Not used | No NPU/TOPS score or acceleration claim |
 
-The design is ARM64-compatible, but the development machine is x64. **Snapdragon hardware performance is unmeasured until you run the device check.** x64 Python can run through Windows 11 emulation; its results are not native ARM64 results. The checker uses IsWow64Process2 to distinguish these cases.
+The design is ARM64-compatible, but the reproducible development report in this checkout is x64. The supplied submission brief reports a user-confirmed 61-test run on an HP Snapdragon X ARM64 laptop; no matching ARM64 device-check JSON is committed here, so that report should not be expanded into performance or native-actuation claims. **Snapdragon hardware performance remains unmeasured until you run the device check.** x64 Python can run through Windows 11 emulation; its results are not native ARM64 results. The checker uses IsWow64Process2 to distinguish these cases.
 
 ## Pull and run on the Snapdragon computer
 
 1. Install Git and **Python 3.13.x ARM64** from the official Python Windows downloads. The 3.13 ARM64 installer is labelled experimental. Add the chosen interpreter to PATH; do not accidentally select an existing x64 Python or 3.14 runtime.
-2. Authenticate GitHub using an account with access to this private repository.
+2. If the checkout requires authentication, use a GitHub account with repository access.
 3. In PowerShell:
 
 ~~~powershell
@@ -33,7 +33,7 @@ python --version
 
 No pip/npm install or administrator access is needed for the source launch. If you installed several Pythons, activate an ARM64 3.13 virtual environment first so `python` selects it.
 
-The device check takes six read-only telemetry samples and runs a fixed 12,000-sample prediction benchmark. It does not enable continuous collection, modify process priorities or load your recorded history. It writes `reports/device-check.json`, which Git ignores. A nonzero exit means a required check failed; the JSON identifies it. Do not describe an emulated result as native.
+The device check takes six read-only telemetry samples and runs a fixed 12,000-sample prediction benchmark. The current repository test suite contains 80 tests; the submission materials refer to the earlier 61-test suite that was reportedly run on ARM64. It does not enable continuous collection, modify process priorities or load your recorded history. It writes `reports/device-check.json`, which Git ignores. A nonzero exit means a required check failed; the JSON identifies it. Do not describe an emulated result as native.
 
 The live app opens http://127.0.0.1:8765/. On a fresh computer, choose **Enable collection**. History belongs to that Windows user at `%LOCALAPPDATA%\Kshetrajna`, independently of the repo and this development computer. Keep priority trials off for initial qualification.
 
@@ -57,7 +57,9 @@ Use two or three everyday apps for several minutes. Confirm foreground names cha
 
 **Pull and run locally is the intended deployment.** The application already has a browser interface backed by a local Windows collector. A publicly hosted page cannot call the user's Win32 APIs or inspect arbitrary processes. Cloud hosting could offer a landing page or a separate synthetic demo, but real telemetry would still require a local agent and additional authentication/privacy design. Do not expose this prototype HTTP service beyond loopback.
 
-CI includes Windows x64 and Linux tests. Standard Windows ARM64 CI is conditional on public repository visibility; it is skipped while this repo is private. No visibility, paid runner or device enrollment is changed automatically.
+CI includes Windows x64 and Linux tests. The Windows ARM64 job is conditional
+on public repository visibility and hosted-runner availability. Check the
+actual workflow result before treating it as platform qualification.
 
 ## References
 

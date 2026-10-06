@@ -230,11 +230,14 @@ class SubmissionTests(unittest.TestCase):
                 response = connection.getresponse()
                 return response.status, response.read(), response.getheader("Content-Security-Policy")
 
-        for asset in ("/", "/app.js", "/app.css", "/intelligence.js", "/intelligence.css"):
+        for asset in ("/", "/app.js", "/app.css", "/intelligence.js", "/intelligence.css",
+                      "/files.js", "/files.css", "/maintenance.js"):
             status, content, policy = call("GET", asset)
             self.assertEqual(status, 200, asset)
             self.assertTrue(content)
             self.assertIn("frame-ancestors 'none'", policy)
+            if asset == "/":
+                self.assertIn(b'<script src="/maintenance.js" defer></script>', content)
         self.assertEqual(call("GET", "/api/state", host="evil.example")[0], 403)
         self.assertEqual(call("POST", "/api/actions/approve", {}, origin="https://evil.example")[0], 403)
         self.assertEqual(call("POST", "/api/settings", [], token="invalid")[0], 403)
@@ -246,7 +249,9 @@ class SubmissionTests(unittest.TestCase):
         self.assertEqual(call("POST", "/api/actions/undo", {"id": decision["id"]})[0], 200)
         status, body, _ = call("GET", "/api/report")
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(body)["mode"], "demo")
+        report = json.loads(body)
+        self.assertEqual(report["mode"], "demo")
+        self.assertEqual(report["version"], "0.3.0")
 
 
 if __name__ == "__main__":

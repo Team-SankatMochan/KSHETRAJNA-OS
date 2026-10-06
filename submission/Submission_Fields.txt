@@ -1,0 +1,23 @@
+PROJECT TITLE
+Kshetrajna: Private Adaptive Intelligence for Windows
+
+GITHUB REPOSITORY LINK
+https://github.com/Team-SankatMochan/KSHETRAJNA-OS
+
+BRIEF PROJECT DESCRIPTION UPLOAD
+Kshetrajna_Project_Description.pdf
+
+SHORT PITCH PRESENTATION PDF UPLOAD
+Kshetrajna_Pitch.pdf
+
+SHORT PITCH PRESENTATION PPT UPLOAD
+Kshetrajna_Pitch.pptx
+
+SNAPDRAGON LAPTOP
+HP laptop with Snapdragon X (processor label X126100), Qualcomm Oryon CPU at 2.96 GHz, 16 GB RAM, ARM64 Windows. Exact HP model not shown in the photo.
+
+YOU HAVE A SNAPDRAGON LAPTOP
+Select Yes if the pictured laptop is yours or the form accepts access to it. The pictured device has completed the test suite according to your confirmed run.
+
+VALIDATION
+All 61 automated tests passed on the Snapdragon ARM64 laptop (user-confirmed device run). The same suite passed on Windows x64. Source commit 61666c8 matches public origin/main. Performance benchmarking remains future work.

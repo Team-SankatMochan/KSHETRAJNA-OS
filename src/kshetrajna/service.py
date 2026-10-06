@@ -212,9 +212,9 @@ class AssistantService:
 
     def report(self):
         state = self.state()
-        return {"product": "Kshetrajna", "version": "0.2.0", "mode": state["mode"],
+        return {"product": "Kshetrajna", "version": "0.3.0", "mode": state["mode"],
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "intelligence": state["intelligence"], "decisions": state["decisions"],
                 "workspaces": state["workspaces"],
                 "measurement_note": "Synthetic demo data is not a performance benchmark. Live before/after changes do not establish causation.",
-                "privacy": "Local only. No titles, URLs, keystrokes, screenshots, or document content."}
+                "privacy": "System telemetry is local and excludes titles, URLs, keystrokes, screenshots, and document content. File Intelligence is separate and may store bounded excerpts from user-approved text files until its catalog is deleted."}

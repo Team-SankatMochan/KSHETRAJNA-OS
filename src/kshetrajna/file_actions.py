@@ -43,8 +43,22 @@ class FileActionManager:
             raise ValueError("Extension change is not allowed")
 
     def validate_move_proposal(self, dest_relative: str) -> None:
-        if ".." in dest_relative or dest_relative.startswith("/") or dest_relative.startswith("\\") or ":" in dest_relative:
+        if not isinstance(dest_relative, str) or not dest_relative or '\0' in dest_relative:
             raise ValueError("Invalid destination path")
+
+        # Treat both slash styles as separators.  The service may run on a
+        # different OS than the path was supplied for, so checking Path alone
+        # is not sufficient for Windows traversal strings such as ..\\x.
+        parts = dest_relative.replace('\\', '/').split('/')
+        if (not parts or any(part in ('', '.', '..') for part in parts)
+                or Path(dest_relative).is_absolute()
+                or Path(dest_relative).drive
+                or Path(dest_relative).root
+                or dest_relative.startswith(('/', '\\'))
+                or ':' in dest_relative):
+            raise ValueError("Invalid destination path")
+        if self._is_invalid_basename(parts[-1]):
+            raise ValueError(f"Invalid filename: {parts[-1]}")
 
     def create_proposal(
         self,
@@ -76,9 +90,10 @@ class FileActionManager:
             self.validate_move_proposal(destination_relative)
             dest_rel = destination_relative
             # Ensure parent exists
-            parent = (Path(file_row["root_path"]) / dest_rel).parent
-            if not parent.exists() or not parent.is_dir():
-                raise ValueError("Destination directory does not exist")
+            if mode != "demo":
+                parent = (Path(file_row["root_path"]) / dest_rel).parent
+                if not parent.exists() or not parent.is_dir():
+                    raise ValueError("Destination directory does not exist")
             
         # Opaque IDs
         action_id = secrets.token_urlsafe(16)
@@ -137,25 +152,40 @@ class FileActionManager:
         if action["status"] == "proposed":
             self.store.update_file_action(action["id"], {"status": "dismissed"})
             
+    @staticmethod
+    def _is_reparse_point(path: Path) -> bool:
+        try:
+            if path.is_symlink():
+                return True
+            stat_result = path.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            return False
+        return bool(getattr(stat_result, "st_file_attributes", 0) & 0x400)
+
     def _validate_path_safety(self, root_path: Path, target_path: Path) -> None:
         resolved_root = root_path.resolve(strict=True)
         resolved_target = target_path.resolve(strict=False)
         if not resolved_target.is_relative_to(resolved_root):
             raise ValueError("Path escapes approved root")
-            
-        # Reparse / symlink defense for source/dest parent
-        # We manually check if parents are reparse points to be safe on Windows.
-        current = resolved_target
-        while current != resolved_root:
-            if current.exists() and current.is_symlink():
-                raise ValueError("Symlink encountered")
-            try:
-                st = current.stat(follow_symlinks=False)
-                if hasattr(st, "st_file_attributes") and (st.st_file_attributes & 0x400):
-                    raise ValueError("Reparse point encountered")
-            except FileNotFoundError:
-                pass
-            current = current.parent
+
+        # Check the lexical path as well as the resolved path.  Resolving first
+        # erases an in-root symlink, which could otherwise redirect a mutation
+        # through a link to a different directory inside the root.
+        lexical_root = Path(os.path.abspath(os.fspath(root_path)))
+        lexical_target = Path(os.path.abspath(os.fspath(target_path)))
+        if not lexical_target.is_relative_to(lexical_root):
+            raise ValueError("Path escapes approved root")
+
+        current = lexical_target
+        while True:
+            if self._is_reparse_point(current):
+                raise ValueError("Symlink or reparse point encountered")
+            if current == lexical_root:
+                break
+            parent = current.parent
+            if parent == current:
+                raise ValueError("Path escapes approved root")
+            current = parent
 
     def apply_action(self, proposal_id: str) -> dict:
         action = self.store.get_file_action(proposal_id=proposal_id)
@@ -218,31 +248,44 @@ class FileActionManager:
             self.store.update_file_action(action["id"], {"status": "failed", "error": str(e)})
             raise ValueError(f"Mutation failed: {e}")
             
-        # Post-action identity
+        # Post-action identity.  A successful rename followed by a race (for
+        # example, the destination being removed or replaced) is not an
+        # applied action, even though the OS mutation already happened.
         try:
             pst = abs_dest.stat(follow_symlinks=False)
-            post_updates = {
-                "post_size": pst.st_size,
-                "post_mtime_ns": pst.st_mtime_ns,
-                "post_dev": pst.st_dev,
-                "post_ino": pst.st_ino,
-                "status": "applied",
-                "applied_at": self._iso(self._now())
-            }
-        except FileNotFoundError:
-            post_updates = {"status": "failed", "error": "Destination vanished right after rename"}
-            
+            identity_matches = (
+                action["expected_dev"] is None
+                or (pst.st_dev == action["expected_dev"] and pst.st_ino == action["expected_ino"])
+            )
+            if not identity_matches:
+                post_updates = {
+                    "status": "failed",
+                    "error": "Destination identity changed right after rename",
+                }
+            else:
+                post_updates = {
+                    "post_size": pst.st_size,
+                    "post_mtime_ns": pst.st_mtime_ns,
+                    "post_dev": pst.st_dev,
+                    "post_ino": pst.st_ino,
+                    "status": "applied",
+                    "applied_at": self._iso(self._now())
+                }
+        except OSError as error:
+            post_updates = {"status": "failed", "error": f"Destination vanished right after rename: {error}"}
+
         self.store.update_file_action(action["id"], post_updates)
-        
-        # Update file catalog
+
+        # Update file catalog only after post-mutation verification succeeds.
         if post_updates.get("status") == "applied":
             with self.store._connect() as db:
                 db.execute(
                     "UPDATE files SET relative_path=?, name=?, extension=? WHERE id=?",
-                    (action["destination_relative"], abs_dest.name, abs_dest.suffix, action["file_id"])
+                    (action["destination_relative"], abs_dest.name, abs_dest.suffix[1:].lower(), action["file_id"])
                 )
-                
-        return {"status": "applied", "message": "RENAMED"}
+            return {"status": "applied", "message": "RENAMED"}
+
+        return {"status": "failed", "message": post_updates["error"]}
 
     def undo_action(self, action_id: str) -> dict:
         action = self.store.get_file_action(action_id=action_id)
@@ -295,7 +338,7 @@ class FileActionManager:
         with self.store._connect() as db:
             db.execute(
                 "UPDATE files SET relative_path=?, name=?, extension=? WHERE id=?",
-                (action["source_relative"], abs_source.name, abs_source.suffix, action["file_id"])
+                (action["source_relative"], abs_source.name, abs_source.suffix[1:].lower(), action["file_id"])
             )
             
         return {"status": "rolled_back", "message": "UNDONE"}

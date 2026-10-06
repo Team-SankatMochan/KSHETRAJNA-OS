@@ -1,0 +1,11 @@
+90-SECOND PITCH
+
+Kshetrajna is a private adaptive intelligence layer for Windows. Our idea is simple: connect what the user is doing with what the machine is experiencing.
+
+Today, resource usage, app activity and local files sit in different tools. Kshetrajna brings them into one local dashboard. It measures real CPU and RAM usage and foreground activity after the user opts in. It learns recurring app routines and uses recent history to suggest what app may come next. It withholds a prediction when the evidence is weak.
+
+We have also added file intelligence. Users choose which folders to index. The assistant offers keyword search and explains why a file may be relevant to the current workflow. A reviewed rename and move API records every action and supports undo when file state permits it.
+
+The user stays in control. Resource trials need individual approval, last 60 seconds and have a recorded recovery path. Data stays local through Python, Win32 and SQLite, with no required cloud service or third-party runtime packages.
+
+All 61 automated tests passed on our HP Snapdragon X laptop running ARM64 Windows. The suite also passes on Windows x64. Our next steps are recording device diagnostics, finishing the organizer panel and measuring whether recommendations improve real workflows.

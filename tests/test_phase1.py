@@ -3,12 +3,11 @@ import json
 import tempfile
 import threading
 import unittest
-from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from kshetrajna.collector import Collector
-from kshetrajna.config import ConfigStore, Settings
+from kshetrajna.config import ConfigStore
 from kshetrajna.models import ProcessSample, Snapshot
 from kshetrajna.server import DashboardServer
 from kshetrajna.storage import EventStore
@@ -62,6 +61,14 @@ class PhaseOneTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.config.update({"unknown": True})
         self.assertFalse(self.config.load().enabled)
+
+    def test_device_consent_is_persisted_once(self):
+        self.assertFalse(self.config.load().device_consent)
+        self.config.update({"device_consent": True, "enabled": True})
+        reloaded = ConfigStore(Path(self.temp.name))
+        self.assertTrue(reloaded.load().device_consent)
+        reloaded.update({"enabled": False})
+        self.assertTrue(reloaded.load().device_consent)
 
     def test_collection_activity_retention_and_delete(self):
         self.collector.update_settings({"enabled": True})

@@ -57,6 +57,22 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def _json(self, status: int, data: dict) -> None:
         self._send(status, json.dumps(data, separators=(",", ":")).encode("utf-8"), "application/json; charset=utf-8")
 
+    @staticmethod
+    def _parse_file_id(value, name: str) -> int:
+        if isinstance(value, bool) or not isinstance(value, str) or not value.isdecimal():
+            raise ValueError(f"Invalid {name}")
+        parsed = int(value)
+        if parsed <= 0:
+            raise ValueError(f"Invalid {name}")
+        return parsed
+
+    @staticmethod
+    def _body_file_id(body: dict, name: str) -> int:
+        value = body.get(name)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"Invalid {name}")
+        return value
+
     def do_GET(self) -> None:
         if not self._allowed_host():
             self._json(403, {"error": "Host rejected"})
@@ -82,28 +98,45 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._json(200, self.server.service.report())
         elif path == "/api/files/state" and self.server.file_service:
             self._json(200, self.server.file_service.state())
+        elif path == "/api/files/known-folders" and self.server.file_service:
+            from .known_folders import discover_known_folders
+            self._json(200, {"folders": discover_known_folders()})
         elif path.startswith("/api/files/root/") and self.server.file_service:
             try:
-                root_id = int(path.split("/")[-1])
+                root_id = self._parse_file_id(path.rsplit("/", 1)[-1], "root_id")
                 self._json(200, self.server.file_service.get_root_details(root_id))
             except ValueError as e:
                 self._json(400, {"error": str(e)})
         elif path == "/api/files/search" and self.server.file_service:
             from urllib.parse import parse_qs
-            qs = parse_qs(urlsplit(self.path).query)
-            q = qs.get("q", [""])[0]
-            root_id = int(qs.get("root_id", [0])[0]) if "root_id" in qs else None
-            self._json(200, self.server.file_service.search(q, root_id))
+            try:
+                qs = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+                q = qs.get("q", [""])[0]
+                root_id = (self._parse_file_id(qs["root_id"][0], "root_id")
+                           if "root_id" in qs else None)
+                self._json(200, self.server.file_service.search(q, root_id))
+            except ValueError as e:
+                self._json(400, {"error": str(e)})
         elif path == "/api/files/insights" and self.server.file_service:
             self._json(200, self.server.file_service.get_insights())
         elif path.startswith("/api/files/file/") and path.endswith("/excerpt") and self.server.file_service:
             try:
-                file_id = int(path.split("/")[-2])
+                file_id = self._parse_file_id(path.split("/")[-2], "file_id")
                 self._json(200, self.server.file_service.get_file_excerpt(file_id))
             except ValueError as e:
                 self._json(400, {"error": str(e)})
         elif path == "/api/files/actions" and self.server.file_service:
             self._json(200, {"actions": self.server.file_service.get_action_journal()})
+        elif path.startswith("/api/files/sort/plan/") and self.server.file_service:
+            plan_id = path.rsplit("/", 1)[-1]
+            if not plan_id or len(plan_id) > 100:
+                self._json(400, {"error": "Invalid sort plan"})
+            else:
+                try:
+                    self._json(200, self.server.file_service._sort_plan_view(
+                        self.server.file_service._sort_plan(plan_id)))
+                except ValueError as error:
+                    self._json(404, {"error": str(error)})
         else:
             self._json(404, {"error": "Not found"})
 
@@ -170,26 +203,41 @@ class DashboardHandler(BaseHTTPRequestHandler):
             elif path == "/api/files/roots/add" and self.server.file_service:
                 self._json(200, self.server.file_service.add_root(body.get("path"), body.get("label", "")))
             elif path == "/api/files/roots/rescan" and self.server.file_service:
-                self.server.file_service.rescan_root(body.get("root_id"))
+                self.server.file_service.rescan_root(self._body_file_id(body, "root_id"))
                 self._json(200, {"rescanned": True})
             elif path == "/api/files/roots/cancel-scan" and self.server.file_service:
-                self.server.file_service.cancel_scan(body.get("root_id"))
+                self.server.file_service.cancel_scan(self._body_file_id(body, "root_id"))
                 self._json(200, {"cancelled": True})
             elif path == "/api/files/roots/remove" and self.server.file_service:
-                self.server.file_service.remove_root(body.get("root_id"))
+                self.server.file_service.remove_root(self._body_file_id(body, "root_id"))
                 self._json(200, {"removed": True})
             elif path == "/api/files/delete-all" and self.server.file_service:
                 self.server.file_service.delete_all()
                 self._json(200, {"deleted": True})
             elif path == "/api/files/actions/propose" and self.server.file_service:
-                self._json(200, self.server.file_service.create_proposal(body.get("file_id"), body.get("kind"), body.get("destination")))
+                self._json(200, self.server.file_service.create_proposal(
+                    self._body_file_id(body, "file_id"), body.get("kind"), body.get("destination")))
             elif path == "/api/files/actions/apply" and self.server.file_service:
-                self._json(200, self.server.file_service.apply_action(body.get("proposal_id")))
+                result = self.server.file_service.apply_action(body.get("proposal_id"))
+                self._json(200 if result.get("status") == "applied" else 409, result)
             elif path == "/api/files/actions/undo" and self.server.file_service:
-                self._json(200, self.server.file_service.undo_action(body.get("action_id")))
+                result = self.server.file_service.undo_action(body.get("action_id"))
+                self._json(200 if result.get("status") == "rolled_back" else 409, result)
             elif path == "/api/files/actions/dismiss" and self.server.file_service:
                 self.server.file_service.dismiss_proposal(body.get("proposal_id"))
                 self._json(200, {"dismissed": True})
+            elif path == "/api/files/sort/preview" and self.server.file_service:
+                self._json(200, self.server.file_service.generate_sort_plan(
+                    self._body_file_id(body, "root_id"), body.get("create_folders", False)))
+            elif path == "/api/files/sort/update" and self.server.file_service:
+                self._json(200, self.server.file_service.update_sort_plan(
+                    body.get("plan_id"), body.get("suggestions")))
+            elif path == "/api/files/sort/apply" and self.server.file_service:
+                result = self.server.file_service.apply_sort_plan(body.get("plan_id"))
+                self._json(200 if result.get("status") in ("applied", "partial") else 409, result)
+            elif path == "/api/files/sort/undo" and self.server.file_service:
+                result = self.server.file_service.undo_sort_plan(body.get("plan_id"))
+                self._json(200 if result.get("status") == "rolled_back" else 409, result)
             else:
                 self._json(404, {"error": "Not found"})
         except (ValueError, TypeError) as error:

@@ -21,10 +21,59 @@ TOOLS = {
     "storage_settings": {"title": "Open Windows storage cleanup", "effect": "Opens Storage settings for temporary files and Storage Sense. Windows owns the final cleanup controls.",
                          "undo": "Opening settings changes nothing. Deletions you approve there may be permanent."},
     "open_temp": {"title": "Review temporary files", "effect": "Opens your current temporary folder in Explorer, equivalent to opening %TEMP%. No files are selected or deleted automatically.",
-                  "undo": "Opening a folder changes nothing. Review files and skip anything in use before deleting them yourself."},
+                   "undo": "Opening a folder changes nothing. Review files and skip anything in use before deleting them yourself."},
+    "temp_cleanup": {"title": "Preview temporary-file cleanup", "effect": "Reviews bounded, old files in the current temporary folder. Recent, protected, sensitive, changed, and locked files are skipped.",
+                      "undo": "Permanent deletion has no automatic undo. The preview lists candidates before you approve it."},
     "store_cache": {"title": "Reset Microsoft Store cache", "effect": "Starts the Windows wsreset utility. The Store may open when it finishes. This resets Store cache, not RAM.",
                     "undo": "Cache reset has no automatic undo. Cache data is rebuilt as the Store is used."},
 }
+
+
+TEMP_MAX_FILES = 100
+TEMP_MAX_BYTES = 500 * 1024 * 1024
+TEMP_MIN_AGE_SECONDS = 24 * 60 * 60
+TEMP_SENSITIVE_NAMES = frozenset({".env", "credentials.json", "id_rsa", "desktop.ini"})
+
+
+def inspect_temp_files() -> list[dict]:
+    """Return a bounded preview from the one fixed temporary directory."""
+    root = Path(tempfile.gettempdir()).resolve(strict=False)
+    now = time.time()
+    candidates = []
+    total = 0
+    pending = [(root, 0)]
+    while pending and len(candidates) < TEMP_MAX_FILES:
+        current, depth = pending.pop()
+        try:
+            entries = list(os.scandir(current))
+        except OSError:
+            continue
+        for entry in entries:
+            if len(candidates) >= TEMP_MAX_FILES or total >= TEMP_MAX_BYTES:
+                break
+            try:
+                if entry.is_symlink():
+                    continue
+                info = entry.stat(follow_symlinks=False)
+                if getattr(info, "st_file_attributes", 0) & 0x400:
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    if depth < 2:
+                        pending.append((Path(entry.path), depth + 1))
+                    continue
+                if entry.name.casefold() in TEMP_SENSITIVE_NAMES:
+                    continue
+                if now - info.st_mtime < TEMP_MIN_AGE_SECONDS or info.st_size < 1:
+                    continue
+                if total + info.st_size > TEMP_MAX_BYTES:
+                    continue
+                relative = Path(entry.path).relative_to(root).as_posix()
+                candidates.append({"relative_path": relative, "name": entry.name,
+                                   "size_bytes": int(info.st_size), "mtime_ns": int(info.st_mtime_ns)})
+                total += info.st_size
+            except (OSError, ValueError):
+                continue
+    return candidates
 
 
 class WindowsMaintenanceDriver:
@@ -34,6 +83,8 @@ class WindowsMaintenanceDriver:
     def execute(self, plan):
         if plan["action"] == "trim_memory":
             return self.trim(plan["target"])
+        if plan["action"] == "temp_cleanup":
+            return self.cleanup_temp(plan.get("candidates", []))
         action = plan["action"]
         if action not in TOOLS:
             raise ValueError("Unknown maintenance action")
@@ -55,6 +106,48 @@ class WindowsMaintenanceDriver:
             self.children.append(subprocess.Popen(command, cwd=str(system), shell=False,
                                                   creationflags=subprocess.CREATE_NO_WINDOW))
         return {"status": "launched", "message": "Windows tool launched. Complete its interface; cleanup completion and reclaimed space are not verified by this app."}
+
+    def cleanup_temp(self, candidates):
+        root = Path(tempfile.gettempdir()).resolve(strict=True)
+        deleted = []
+        skipped = []
+        for candidate in candidates[:TEMP_MAX_FILES]:
+            relative = candidate.get("relative_path") if isinstance(candidate, dict) else None
+            if not isinstance(relative, str) or not relative or '\0' in relative:
+                skipped.append({"name": "(invalid candidate)", "reason": "invalid path"})
+                continue
+            parts = relative.replace('\\', '/').split('/')
+            if any(part in ('', '.', '..') for part in parts) or ':' in relative:
+                skipped.append({"name": parts[-1] if parts else "(invalid candidate)", "reason": "path rejected"})
+                continue
+            path = root.joinpath(*parts)
+            try:
+                if not path.resolve(strict=False).is_relative_to(root):
+                    raise ValueError("path rejected")
+                current = path
+                while True:
+                    if current.is_symlink() or (current.exists() and
+                                                getattr(current.stat(follow_symlinks=False), "st_file_attributes", 0) & 0x400):
+                        raise ValueError("reparse point or symlink")
+                    if current == root:
+                        break
+                    if current.parent == current:
+                        raise ValueError("path rejected")
+                    current = current.parent
+                if path.is_symlink() or not path.is_file():
+                    raise ValueError("not a regular file")
+                info = path.stat(follow_symlinks=False)
+                if getattr(info, "st_file_attributes", 0) & 0x400:
+                    raise ValueError("reparse point")
+                if (candidate.get("size_bytes") != info.st_size or
+                        candidate.get("mtime_ns") != info.st_mtime_ns):
+                    raise ValueError("file changed after preview")
+                path.unlink()
+                deleted.append({"name": path.name, "size_bytes": info.st_size})
+            except (OSError, ValueError) as error:
+                skipped.append({"name": path.name, "reason": str(error)})
+        return {"status": "completed", "deleted": deleted, "skipped": skipped,
+                "message": f"Deleted {len(deleted)} reviewed temporary files; skipped {len(skipped)}."}
 
     def trim(self, target):
         driver = WindowsPriorityDriver()
@@ -120,6 +213,12 @@ class MaintenanceService:
             if len(self.plans) >= 20:
                 raise ValueError("Too many open previews; wait one minute")
             plan = {**offer, "id": uuid.uuid4().hex, "offer_id": action_id, "expires_at": now + 60}
+            if offer["action"] == "temp_cleanup":
+                candidates = [] if self.demo else inspect_temp_files()
+                plan["candidates"] = candidates
+                plan["effect"] = (f"Review {len(candidates)} bounded temporary-file candidates "
+                                  f"({sum(item['size_bytes'] for item in candidates) / 1024**2:.1f} MiB). "
+                                  "Recent, protected, sensitive, changed, and locked files are skipped.")
             self.plans[plan["id"]] = plan
             return dict(plan)
 

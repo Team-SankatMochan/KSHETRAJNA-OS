@@ -21,6 +21,15 @@ document.addEventListener('kshetrajna-state', event => {
         $('maintenance-title').textContent = result.plan.title;
         $('maintenance-effect').textContent = result.plan.effect;
         $('maintenance-undo').textContent = result.plan.undo;
+        const candidates = $('maintenance-candidates');
+        candidates.replaceChildren();
+        if (result.plan.candidates?.length) {
+          candidates.append(element('strong', 'Candidates included in this preview'));
+          for (const candidate of result.plan.candidates.slice(0, 20)) {
+            candidates.append(element('small', `${candidate.name} · ${(candidate.size_bytes / 1048576).toFixed(2)} MiB`));
+          }
+          if (result.plan.candidates.length > 20) candidates.append(element('small', `+ ${result.plan.candidates.length - 20} more bounded candidates`));
+        }
         $('maintenance-mode').textContent = state.mode === 'demo' ? 'Simulation: no Windows changes.' : 'Live action on this PC. Approval expires in 60 seconds.';
         $('maintenance-dialog').showModal();
       } catch (error) { setFeedback(error.message, true); }

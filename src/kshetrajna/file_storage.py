@@ -92,6 +92,34 @@ class FileStore:
                     error                TEXT,
                     mode                 TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS sort_plans (
+                    id             TEXT PRIMARY KEY,
+                    root_id        INTEGER NOT NULL REFERENCES roots(id) ON DELETE CASCADE,
+                    created_at     TEXT NOT NULL,
+                    expires_at     TEXT NOT NULL,
+                    status         TEXT NOT NULL,
+                    mode           TEXT NOT NULL,
+                    create_folders INTEGER NOT NULL DEFAULT 0,
+                    created_dirs   TEXT NOT NULL DEFAULT '[]',
+                    error          TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS sort_suggestions (
+                    id                   TEXT PRIMARY KEY,
+                    plan_id              TEXT NOT NULL REFERENCES sort_plans(id) ON DELETE CASCADE,
+                    file_id              INTEGER REFERENCES files(id) ON DELETE SET NULL,
+                    source_relative      TEXT NOT NULL,
+                    destination_relative TEXT NOT NULL,
+                    reason               TEXT NOT NULL,
+                    confidence           INTEGER NOT NULL,
+                    selected             INTEGER NOT NULL DEFAULT 0,
+                    status               TEXT NOT NULL DEFAULT 'suggested',
+                    error                TEXT,
+                    action_id            TEXT,
+                    created_at           TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_sort_suggestions_plan ON sort_suggestions(plan_id);
             """)
 
     @contextmanager
@@ -145,10 +173,36 @@ class FileStore:
 
     def remove_root(self, root_id: int) -> None:
         with self._connect() as db:
+            unresolved = db.execute(
+                "SELECT COUNT(*) FROM file_actions WHERE root_id=? AND status IN ('proposed','prepared','active','applied','undo_failed')",
+                (root_id,),
+            ).fetchone()[0]
+            if unresolved:
+                raise ValueError("Resolve file action recovery records before removing this root")
+            db.execute("DELETE FROM file_actions WHERE root_id=?", (root_id,))
             db.execute("DELETE FROM roots WHERE id=?", (root_id,))
+
+    def has_unresolved_file_actions(self, root_id: int | None = None) -> bool:
+        with self._connect() as db:
+            if root_id is None:
+                row = db.execute(
+                    "SELECT 1 FROM file_actions WHERE status IN ('proposed','prepared','active','applied','undo_failed') LIMIT 1"
+                ).fetchone()
+            else:
+                row = db.execute(
+                    "SELECT 1 FROM file_actions WHERE root_id=? AND status IN ('proposed','prepared','active','applied','undo_failed') LIMIT 1",
+                    (root_id,),
+                ).fetchone()
+            return row is not None
 
     def clear_all(self) -> None:
         with self._connect() as db:
+            unresolved = db.execute(
+                "SELECT COUNT(*) FROM file_actions WHERE status IN ('proposed','prepared','active','applied','undo_failed')"
+            ).fetchone()[0]
+            if unresolved:
+                raise ValueError("Resolve file action recovery records before deleting the file catalog")
+            db.execute("DELETE FROM file_actions")
             db.execute("DELETE FROM roots")
             db.execute("DELETE FROM files")
             db.execute("DELETE FROM scan_state")
@@ -162,14 +216,14 @@ class FileStore:
         with self._connect() as db:
             if root_id is not None:
                 rows = db.execute(
-                    "SELECT id, root_id, relative_path, name, extension, size_bytes, modified_at, mime_guess, excerpt "
-                    "FROM files WHERE root_id=? AND (name LIKE ? ESCAPE '\\' OR relative_path LIKE ? ESCAPE '\\' OR excerpt LIKE ? ESCAPE '\\') LIMIT ?",
+                    "SELECT f.id, f.root_id, r.path AS root_path, f.relative_path, f.name, f.extension, f.size_bytes, f.modified_at, f.mime_guess, f.excerpt "
+                    "FROM files f JOIN roots r ON r.id=f.root_id WHERE f.root_id=? AND (f.name LIKE ? ESCAPE '\\' OR f.relative_path LIKE ? ESCAPE '\\' OR f.excerpt LIKE ? ESCAPE '\\') LIMIT ?",
                     (root_id, safe_q, safe_q, safe_q, limit)
                 ).fetchall()
             else:
                 rows = db.execute(
-                    "SELECT id, root_id, relative_path, name, extension, size_bytes, modified_at, mime_guess, excerpt "
-                    "FROM files WHERE name LIKE ? ESCAPE '\\' OR relative_path LIKE ? ESCAPE '\\' OR excerpt LIKE ? ESCAPE '\\' LIMIT ?",
+                    "SELECT f.id, f.root_id, r.path AS root_path, f.relative_path, f.name, f.extension, f.size_bytes, f.modified_at, f.mime_guess, f.excerpt "
+                    "FROM files f JOIN roots r ON r.id=f.root_id WHERE f.name LIKE ? ESCAPE '\\' OR f.relative_path LIKE ? ESCAPE '\\' OR f.excerpt LIKE ? ESCAPE '\\' LIMIT ?",
                     (safe_q, safe_q, safe_q, limit)
                 ).fetchall()
             return [dict(row) for row in rows]
@@ -199,6 +253,16 @@ class FileStore:
             rows = db.execute(
                 "SELECT id, root_id, relative_path, name, extension, size_bytes, modified_at, mime_guess, excerpt "
                 "FROM files ORDER BY modified_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_sortable_files(self, root_id: int) -> list[dict]:
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT id, root_id, relative_path, name, extension, size_bytes, modified_at, "
+                "created_at, is_directory, mime_guess, excerpt FROM files "
+                "WHERE root_id=? AND is_directory=0 ORDER BY relative_path COLLATE NOCASE",
+                (root_id,),
             ).fetchall()
             return [dict(row) for row in rows]
 
@@ -245,3 +309,57 @@ class FileStore:
         with self._connect() as db:
             rows = db.execute("SELECT * FROM file_actions ORDER BY created_at DESC LIMIT 100").fetchall()
             return [dict(row) for row in rows]
+
+    def save_sort_plan(self, plan: dict, suggestions: list[dict]) -> None:
+        with self._connect() as db:
+            db.execute(
+                "INSERT INTO sort_plans (id,root_id,created_at,expires_at,status,mode,create_folders,created_dirs,error) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (plan["id"], plan["root_id"], plan["created_at"], plan["expires_at"], plan["status"],
+                 plan["mode"], int(plan.get("create_folders", False)), plan.get("created_dirs", "[]"), plan.get("error")),
+            )
+            db.executemany(
+                "INSERT INTO sort_suggestions "
+                "(id,plan_id,file_id,source_relative,destination_relative,reason,confidence,selected,status,error,action_id,created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                [(s["id"], plan["id"], s.get("file_id"), s["source_relative"], s["destination_relative"],
+                  s["reason"], s["confidence"], int(s.get("selected", False)), s.get("status", "suggested"),
+                  s.get("error"), s.get("action_id"), s["created_at"]) for s in suggestions],
+            )
+
+    def get_sort_plan(self, plan_id: str) -> dict | None:
+        with self._connect() as db:
+            plan = db.execute("SELECT * FROM sort_plans WHERE id=?", (plan_id,)).fetchone()
+            if not plan:
+                return None
+            result = dict(plan)
+            result["suggestions"] = [dict(row) for row in db.execute(
+                "SELECT * FROM sort_suggestions WHERE plan_id=? ORDER BY source_relative COLLATE NOCASE",
+                (plan_id,),
+            )]
+            return result
+
+    def get_sort_plans(self, limit: int = 20) -> list[dict]:
+        with self._connect() as db:
+            rows = db.execute("SELECT * FROM sort_plans ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+            return [dict(row) for row in rows]
+
+    def update_sort_plan(self, plan_id: str, updates: dict) -> None:
+        if not updates:
+            return
+        with self._connect() as db:
+            columns = list(updates)
+            db.execute(
+                f"UPDATE sort_plans SET {', '.join(f'{column}=?' for column in columns)} WHERE id=?",
+                tuple(updates[column] for column in columns) + (plan_id,),
+            )
+
+    def update_sort_suggestion(self, suggestion_id: str, updates: dict) -> None:
+        if not updates:
+            return
+        with self._connect() as db:
+            columns = list(updates)
+            db.execute(
+                f"UPDATE sort_suggestions SET {', '.join(f'{column}=?' for column in columns)} WHERE id=?",
+                tuple(updates[column] for column in columns) + (suggestion_id,),
+            )

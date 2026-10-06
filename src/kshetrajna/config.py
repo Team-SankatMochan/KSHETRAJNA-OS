@@ -16,6 +16,7 @@ def default_data_dir() -> Path:
 @dataclass(frozen=True)
 class Settings:
     enabled: bool = False
+    device_consent: bool = False
     sample_interval_seconds: int = 5
     retention_days: int = 7
     max_processes: int = 12
@@ -33,7 +34,7 @@ class Settings:
         if set(value) - allowed:
             raise ValueError("Unknown setting")
         merged = {**asdict(cls()), **value}
-        for key in ("enabled", "track_processes", "track_foreground", "allow_priority_changes", "allow_maintenance"):
+        for key in ("enabled", "device_consent", "track_processes", "track_foreground", "allow_priority_changes", "allow_maintenance"):
             if type(merged[key]) is not bool:
                 raise ValueError(f"{key} must be a boolean")
         bounds = {

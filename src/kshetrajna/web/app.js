@@ -3,6 +3,7 @@ const $ = (id) => document.getElementById(id);
 const fmt = (value, digits = 1) => Number(value).toFixed(digits);
 const bytes = (value) => `${fmt(value / 1073741824)} GB`;
 let currentSettings = null;
+let currentMode = 'live';
 let refreshing = false;
 let toastTimer;
 
@@ -104,6 +105,7 @@ function renderActivity(events) {
 
 function render(state) {
   const settings = state.settings;
+  currentMode = state.mode;
   const changed = !currentSettings || JSON.stringify(settings) !== JSON.stringify(currentSettings);
   currentSettings = settings;
   $('status').classList.toggle('active', settings.enabled);
@@ -141,7 +143,15 @@ async function refresh() {
 }
 
 $('capture-button').addEventListener('click', async () => {
-  try { await post('/api/settings', { enabled: !currentSettings.enabled }); await refresh(); setFeedback(currentSettings.enabled ? 'Collection enabled.' : 'Collection paused.'); }
+  try {
+    const enabling = !currentSettings.enabled;
+    const payload = { enabled: enabling };
+    if (enabling && currentMode !== 'demo' && !currentSettings.device_consent) {
+      if (!window.confirm('Allow Kshetrajna to collect local CPU, memory, process-basename, foreground, and idle telemetry? This consent is saved once in your local settings. No keystrokes, clipboard, URLs, titles, screenshots, or document content are collected.')) return;
+      payload.device_consent = true;
+    }
+    await post('/api/settings', payload); await refresh(); setFeedback(currentSettings.enabled ? 'Collection enabled.' : 'Collection paused.');
+  }
   catch (error) { setFeedback(error.message, true); }
 });
 $('settings-form').addEventListener('submit', async (event) => {

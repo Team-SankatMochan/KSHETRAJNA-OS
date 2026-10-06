@@ -13,3 +13,4 @@ dist/
 .instance.lock
 reports/
 config.json
+__agent__/

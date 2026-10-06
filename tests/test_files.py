@@ -151,7 +151,9 @@ class TestFileStorageAndScanner(unittest.TestCase):
         root_id = self.service.add_root(str(p), "Root")["id"]
         self.wait_scan(root_id)
 
-        self.assertEqual(len(self.service.search("target_100%").get("results")), 1)
+        result = self.service.search("target_100%").get("results")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["path"], str(p / "target_100%.txt"))
         self.assertEqual(len(self.service.search("_world").get("results")), 1)
         self.assertEqual(len(self.service.search("'; DROP TABLE files; --").get("results")), 0)
 

@@ -1,36 +1,42 @@
 # Validation record
 
-Date: 30 September 2026. This records checks actually performed on the submission prototype.
+Date: 6 October 2026. This records checks actually performed in the current development checkout.
 
 ## Environment
 
-- Windows 11, build 26200, AMD64.
-- CPython 3.13.3; no third-party runtime packages.
-- Local browser dashboard served at 127.0.0.1:8766 in isolated synthetic demo mode.
+- Linux x86_64 development runner for this session; Windows-only native calls were not executed here.
+- CPython 3.14.4; no third-party runtime packages.
+- Local loopback APIs and isolated temporary-folder fixtures.
 
 ## Results
 
 | Check | Result |
 |---|---|
-| Python unittest suite | 35 tests passed, including pattern/prediction, privacy and device diagnostic checks |
-| JavaScript syntax | Both dashboard scripts passed Node syntax checks |
-| HTTP integration | Assets, security headers, Host/Origin/token validation, request validation, approval, undo and report export passed |
+| Python unittest suite | 80 tests total: 78 passed, 2 platform-specific skips on CPython 3.14.4/Linux x86_64; includes pattern/prediction, privacy, file-action hardening, Sort AI batch lifecycle, temporary maintenance scope, automatic path discovery, persisted consent, Jarvis bridge validation, malformed file API, and device diagnostic checks |
+| Jarvis bridge | Local in-process dispatch, loopback token reuse, JSON-lines validation, explicit apply/undo confirmation, and synthetic command smoke passed |
+| JavaScript syntax | All four dashboard scripts passed Node syntax checks |
+| HTTP integration | Assets, security headers, Host/Origin/token validation, request validation, approval, undo, report export, and Sort AI plan preview passed |
+| Demo launch smoke | `PYTHONUNBUFFERED=1 PYTHONPATH=src python3 -m kshetrajna --demo --no-browser --port 8800` started the loopback server and reported synthetic mode; it was stopped by the controlled timeout |
 | Privacy and persistence | Consent, retention, deletion, migration and instance lock tested |
 | Action lifecycle | Journal before apply, stale proposal rejection, single active trial, expiry, restart recovery and failed restoration tested |
 | Native driver logic | Controlled doubles verified allowed priority changes, preservation of external changes and PID reuse rejection |
-| Windows observation | Live read-only CPU, physical RAM, process and idle samples returned on this machine |
-| Browser interaction | Simulated approval, saved workspace activation, manual rollback and outcome display verified |
-| Browser console | No errors observed during the interaction check |
+| Windows observation | Not executed in this Linux integration session; earlier Windows x64 results are historical |
+| Browser interaction | Simulated approval, saved workspace activation, manual rollback and outcome display are covered by existing browser-path code; Sort AI DOM syntax was checked, while a full browser automation run was not available in this runner |
+| Browser console | Not checked in this session; dashboard scripts passed syntax checks |
 | Workflow prediction | Sequence disambiguation, idle/gap boundaries, habit drift, ambiguity abstention and chronological replay verified with synthetic histories |
-| Repository whitespace | git diff --check passed |
+| File-action hardening | Root file/symlink rejection, scan-limit truncation, post-mutation race handling, malformed numeric API IDs, catalog-deletion protection, and Sort AI conflict/undo fixtures passed focused regression tests |
+| Repository whitespace | `git diff --check` passed for the experimental snapshot |
 
-The browser trial displayed before/after observations with an explicit noncausal caveat. Synthetic readings do not demonstrate a performance improvement.
+The journal displays before/after observations with an explicit noncausal
+caveat. Synthetic readings do not demonstrate a performance improvement.
 
-## Development-device baseline (x64, not Snapdragon)
+## Development-device baseline (not reproduced in this session)
 
-The device checker passed on CPython 3.13.3, native Windows x64, with the expected Win32 structure sizes. Five timed runs of the fixed 12,000-snapshot synthetic pattern workload gave a median of **32.153 ms** and p95 of **36.321 ms**. Six real read-only telemetry samples gave a median collection time of **11.270 ms**, p95 **13.007 ms**, and diagnostic-process sampled working set **29.65 MiB**. CPU use during the one-second diagnostic sampling window was **0.772% of one core**. These short measurements are workload-dependent and do not represent Snapdragon results or normal dashboard overhead.
+The committed historical record reports a Windows 11 x64 CPython 3.13.3 device check and short synthetic/read-only measurements. Those measurements were not rerun after this integration pass and are not presented as current results. The supplied project brief separately reports that the earlier 61-test suite passed on a user-confirmed Snapdragon ARM64 laptop; no ARM64 diagnostic JSON is included in this checkout, so that device claim is not independently reproduced by this validation record.
 
-Foreground was unavailable in this noninteractive diagnostic runner (0/6 samples); foreground tracking was separately observed working in the user's live desktop dashboard. Device checks must be repeated in an interactive session on the Snapdragon computer. See [device setup and interpretation](SNAPDRAGON.md).
+The historical Windows diagnostic runner lacked interactive foreground
+readings. Device checks must be repeated in an interactive session on the
+Snapdragon computer. See [device setup and interpretation](SNAPDRAGON.md).
 
 ## Reproduce
 
@@ -40,11 +46,14 @@ Foreground was unavailable in this noninteractive diagnostic runner (0/6 samples
 
 ## Qualification still required
 
-- Native ARM64/Snapdragon hardware has not been tested.
+- Native ARM64/Snapdragon diagnostics are not independently reproduced in this checkout; the submission materials contain a user-confirmed report of the earlier 61-test suite on an ARM64 laptop, but no committed device-check artifact.
 - Real process priority changes were not executed against user applications during validation; native behavior was tested with controlled doubles.
 - CI configuration is included, but a remote CI run has not been observed.
 - No controlled benchmark, battery measurement, production security audit or installer qualification has been completed.
-- Workspace adaptation currently changes the dashboard board. It does not arrange desktop windows.
+- Workspace adaptation currently changes the dashboard board. It does not arrange desktop windows or launch applications.
+- Sort AI is deterministic metadata organization rather than semantic model inference; no model download, NPU runtime, or accelerated provider is included.
+- No signed installer or packaged x64/ARM64 artifact has been qualified.
+- The runner does not have `pip`, so a wheel build could not be executed here; source launch remains the verified deployment path.
 - Recovery restores the selected process. Descendant inheritance and recovery while the app remains crashed need further engineering.
 
 This is an end-to-end hackathon prototype covering the project phases, with these limits stated explicitly; it is not a production operating system.
