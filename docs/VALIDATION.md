@@ -11,6 +11,10 @@
   explicitly labeled synthetic/scripted; no real PC operation was performed.
 - These checks previewed the static site locally. A real Vercel deployment
   has not been made. See [deployment settings](VERCEL.md).
+- GitHub run `38468264761` passed Linux and Windows ARM64. Windows x64 exposed
+  the same wide-integer issue in the post-action file-identity fields. The
+  lossless storage codec and round-trip regression now cover both expected and
+  post-action device/inode values; the corrected commit must pass a fresh run.
 
 ## Update: 13 October 2026 — local assistant
 

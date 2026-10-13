@@ -309,7 +309,7 @@ class FileStore:
     @staticmethod
     def _encode_identity(values: dict) -> dict:
         result = dict(values)
-        for key in ("expected_dev", "expected_ino"):
+        for key in ("expected_dev", "expected_ino", "post_dev", "post_ino"):
             value = result.get(key)
             if type(value) is int and not -(2**63) <= value < 2**63:
                 # NTFS identity values can exceed SQLite's signed 64-bit range.
@@ -320,7 +320,7 @@ class FileStore:
     @staticmethod
     def _decode_identity(values: dict) -> dict:
         result = dict(values)
-        for key in ("expected_dev", "expected_ino"):
+        for key in ("expected_dev", "expected_ino", "post_dev", "post_ino"):
             value = result.get(key)
             if isinstance(value, str) and value.startswith("bigint:"):
                 if len(value) > 256:

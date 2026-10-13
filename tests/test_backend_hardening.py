@@ -63,15 +63,23 @@ class TestBackendHardening(unittest.TestCase):
         action = {"id":"large-identity", "proposal_id":"large-proposal", "root_id":1,
                   "file_id":1, "kind":"RENAME", "source_relative":"doc.txt",
                   "destination_relative":"next.txt", "expected_dev":2**80,
-                  "expected_ino":2**100+123, "created_at":"now", "expires_at":"later",
+                  "expected_ino":2**100+123, "post_dev":2**81+9,
+                  "post_ino":2**101+789, "created_at":"now", "expires_at":"later",
                   "status":"proposed", "mode":"demo"}
         self.store.save_file_action(action)
         loaded = self.store.get_file_action(action_id=action["id"])
-        self.assertEqual(loaded["expected_dev"], action["expected_dev"])
-        self.assertEqual(loaded["expected_ino"], action["expected_ino"])
-        self.store.update_file_action(action["id"], {"expected_ino":2**110+456})
-        self.assertEqual(self.store.get_file_action(action_id=action["id"])["expected_ino"], 2**110+456)
-        self.assertEqual(self.store.get_file_actions()[0]["expected_ino"], 2**110+456)
+        identity_fields = ("expected_dev", "expected_ino", "post_dev", "post_ino")
+        for field in identity_fields:
+            with self.subTest(path="insert", field=field):
+                self.assertEqual(loaded[field], action[field])
+        updated = {field: 2**(110+index)+456 for index, field in enumerate(identity_fields)}
+        self.store.update_file_action(action["id"], updated)
+        loaded = self.store.get_file_action(action_id=action["id"])
+        journal = self.store.get_file_actions()[0]
+        for field, expected in updated.items():
+            with self.subTest(path="update", field=field):
+                self.assertEqual(loaded[field], expected)
+                self.assertEqual(journal[field], expected)
 
     def test_root_validation_rejects_files_and_symlink_roots(self):
         file_path = Path(self.temp.name) / "not-a-directory"
