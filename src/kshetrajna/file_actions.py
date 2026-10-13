@@ -358,6 +358,8 @@ class FileActionManager:
                 raise ValueError("Destination file size changed")
             if action["post_mtime_ns"] is not None and st.st_mtime_ns != action["post_mtime_ns"]:
                 raise ValueError("Destination file modified time changed")
+            if action["post_dev"] is not None and (st.st_dev != action["post_dev"] or st.st_ino != action["post_ino"]):
+                raise ValueError("Destination file identity changed")
         except FileNotFoundError:
             raise ValueError("Destination file missing")
             
@@ -383,7 +385,9 @@ class FileActionManager:
             rows = db.execute("SELECT * FROM file_actions WHERE status='prepared'").fetchall()
             
         for row in rows:
-            action = dict(row)
+            action = self.store.get_file_action(action_id=row["id"])
+            if not action:
+                continue
             root_row = self.store.get_root_details(action["root_id"]) if hasattr(self.store, "get_root_details") else None
             if not root_row:
                 with self.store._connect() as db:
@@ -397,6 +401,12 @@ class FileActionManager:
                 
             abs_source = root_path / action["source_relative"]
             abs_dest = root_path / action["destination_relative"]
+            try:
+                self._validate_path_safety(root_path, abs_source)
+                self._validate_path_safety(root_path, abs_dest)
+            except (ValueError, OSError):
+                self.store.update_file_action(action["id"], {"status": "conflict", "error": "Reconciled: Unsafe or missing approved path"})
+                continue
 
             if action["kind"] == "DELETE":
                 if abs_source.exists():
@@ -422,6 +432,8 @@ class FileActionManager:
                         match = False
                     if action["expected_mtime_ns"] is not None and st.st_mtime_ns != action["expected_mtime_ns"]:
                         match = False
+                    if action["expected_dev"] is not None and (st.st_dev != action["expected_dev"] or st.st_ino != action["expected_ino"]):
+                        match = False
                     if match:
                         self.store.update_file_action(action["id"], {
                             "status": "applied", 
@@ -434,7 +446,7 @@ class FileActionManager:
                         with self.store._connect() as db:
                             db.execute(
                                 "UPDATE files SET relative_path=?, name=?, extension=? WHERE id=?",
-                                (action["destination_relative"], abs_dest.name, abs_dest.suffix, action["file_id"])
+                                (action["destination_relative"], abs_dest.name, abs_dest.suffix[1:].lower(), action["file_id"])
                             )
                     else:
                         self.store.update_file_action(action["id"], {"status": "conflict", "error": "Reconciled: Dest exists but identity mismatch"})

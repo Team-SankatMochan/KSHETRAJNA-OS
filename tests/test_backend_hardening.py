@@ -122,6 +122,32 @@ class TestBackendHardening(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         self.assertEqual(self.store.get_file_action(action_id=action["id"])["status"], "failed")
 
+    def test_undo_and_recovery_reject_replaced_file_with_matching_size_and_time(self):
+        root = Path(self.temp.name) / "root"
+        root.mkdir()
+        source = root / "doc.txt"
+        source.write_text("hello")
+        with self.store._connect() as db:
+            db.execute("INSERT INTO roots (id,path,created_at,status) VALUES (1,?,'now','ready')", (str(root),))
+            db.execute("INSERT INTO files (id,root_id,relative_path,name,indexed_at) VALUES (1,1,'doc.txt','doc.txt','now')")
+        manager = FileActionManager(self.store)
+        action = manager.create_proposal(1, "RENAME", "next.txt")
+        manager.apply_action(action["proposal_id"])
+        destination = root / "next.txt"
+        original_stat = destination.stat()
+        destination.rename(root / "original-preserved.txt")
+        destination.write_text("hello")
+        os.utime(destination, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+        self.assertNotEqual(destination.stat().st_ino, original_stat.st_ino)
+        with self.assertRaisesRegex(ValueError, "identity changed"):
+            manager.undo_action(action["id"])
+        self.assertFalse(source.exists())
+        self.assertTrue(destination.exists())
+        self.store.update_file_action(action["id"], {"status":"prepared"})
+        manager.reconcile_actions()
+        self.assertEqual(self.store.get_file_action(action_id=action["id"])["status"], "conflict")
+        self.assertEqual((root / "original-preserved.txt").read_text(), "hello")
+
     def test_file_catalog_extension_stays_normalized_after_undo(self):
         root = Path(self.temp.name) / "root"
         root.mkdir()

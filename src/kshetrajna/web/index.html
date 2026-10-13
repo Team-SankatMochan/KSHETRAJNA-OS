@@ -72,7 +72,7 @@
             <label class="toggle-row"><span><strong>Allow Windows maintenance</strong><small>Review each tool launch, Store cache reset or background memory trim. Some actions have no undo.</small></span><input type="checkbox" name="allow_maintenance"></label>
             <label class="toggle-row"><span><strong>Allow reviewed app controls</strong><small>Ask one allowlisted background app to close. Force termination requires its exact name and can lose unsaved work.</small></span><input type="checkbox" name="allow_process_control"></label>
             <div class="field-grid"><label>Sample every<select name="sample_interval_seconds"><option value="2">2 seconds</option><option value="5">5 seconds</option><option value="10">10 seconds</option><option value="30">30 seconds</option><option value="60">60 seconds</option></select></label><label>Keep history<select name="retention_days"><option value="1">1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option></select></label></div>
-            <div class="control-actions"><button type="submit" class="secondary">Save preferences</button><button type="button" id="delete-button" class="danger">Delete recorded history</button></div>
+            <div class="control-actions"><button type="submit" class="secondary">Save preferences</button><button type="button" id="delete-button" class="danger">Delete recorded history</button><button type="button" id="quit-button" class="secondary">Quit Kshetrajna</button></div>
           </form>
           <p class="feedback" id="feedback" role="status"></p>
         </article>
@@ -136,7 +136,7 @@
           <div id="file-action-journal" class="decision-journal"></div>
         </article>
       </section>
-      <footer><span>KSHETRAJNA / HACKATHON PROTOTYPE v0.3</span><span>LOCAL INTELLIGENCE · EXPLICIT CONSENT · AUDITABLE ACTIONS</span></footer>
+      <footer><span>KSHETRAJNA / HACKATHON PROTOTYPE v0.4</span><span>LOCAL INTELLIGENCE · EXPLICIT CONSENT · AUDITABLE ACTIONS</span></footer>
     </main>
   </div>
   <dialog id="approval-dialog"><p class="eyebrow">REVIEW BEFORE APPROVAL</p><h2 id="approval-title"></h2><p id="approval-reason"></p><div id="approval-effect" class="approval-effect"></div><p id="approval-mode" class="control-note"></p><p class="control-note">Undo is available in the journal. A live trial restores this PID only; newly spawned child processes may inherit its priority. If the app crashes, restart it to attempt recovery.</p><div class="control-actions"><button id="confirm-trial" class="primary">Approve 60-second trial</button><button id="cancel-trial" class="secondary">Cancel</button></div></dialog>

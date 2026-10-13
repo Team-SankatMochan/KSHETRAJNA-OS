@@ -237,6 +237,33 @@ class ChatTests(unittest.TestCase):
 
 class ChatHttpTests(unittest.TestCase):
     setUp = ChatTests.setUp
+    def test_shutdown_requires_origin_token_and_explicit_confirmation(self):
+        server = DashboardServer(0, self.collector, self.config, self.store, demo=True)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        port = server.server_port
+        def shutdown(body, token=server.token, origin=None):
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            connection.request("POST", "/api/shutdown", json.dumps(body),
+                {"Content-Type":"application/json", "Origin": origin or f"http://127.0.0.1:{port}",
+                 "X-Kshetrajna-Token": token})
+            response = connection.getresponse()
+            response.read()
+            result = response.status
+            connection.close()
+            return result
+        self.assertEqual(shutdown({"confirm":True}, token="wrong"), 403)
+        self.assertEqual(shutdown({"confirm":True}, origin="https://untrusted.example"), 403)
+        self.assertEqual(shutdown({}), 400)
+        self.assertEqual(shutdown({"confirm":"yes"}), 400)
+        self.assertFalse(server.shutdown_requested)
+        self.assertEqual(shutdown({"confirm":True}), 200)
+        thread.join(timeout=3)
+        self.assertFalse(thread.is_alive())
+        self.assertTrue(server.shutdown_requested)
+
     def test_http_chat_guards_assets_and_approval_boundary(self):
         server = DashboardServer(0, self.collector, self.config, self.store, demo=True)
         server.chat.client = self.model

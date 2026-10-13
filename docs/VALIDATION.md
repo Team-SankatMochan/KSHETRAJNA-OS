@@ -1,5 +1,21 @@
 # Validation record
 
+## Update: 14 October 2026 — self-contained distribution
+
+- Windows x64 source suite: **129 tests passed** in 46.369 seconds.
+- A local inspection build using the hash-pinned official CPython 3.13.16 x64
+  runtime passed bundle-integrity checks, packaged SQLite/app import, read-only
+  Windows diagnostics, isolated live startup with all collection/action opt-ins
+  disabled, synthetic demo startup, asset loading, shutdown approval guards,
+  and graceful exits. This inspection build was not published.
+- New installation fixtures verify corruption/traversal/link rejection,
+  post-copy integrity, preserved history, repeat installs and retained versions.
+- New file-action checks reject undo/recovery after the target is replaced with
+  a different file of identical size and timestamp. Recovery also revalidates
+  approved paths and normalizes catalog extensions.
+- Native x64/ARM64 CI package verification and public release publication are
+  required before making release-qualified packaging claims.
+
 ## Update: 14 October 2026 — Vercel demo
 
 - Public local-PC onboarding now includes source download, Python architecture

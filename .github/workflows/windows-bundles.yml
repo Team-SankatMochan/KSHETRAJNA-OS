@@ -1,0 +1,45 @@
+name: Windows bundles
+on:
+  workflow_dispatch:
+  push:
+    branches: [experimental/sort-ai-jarvis, main]
+    paths: ['src/**', 'scripts/**', 'tests/**', 'pyproject.toml', '.github/workflows/windows-bundles.yml']
+permissions:
+  contents: read
+jobs:
+  bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            architecture: x64
+            python_architecture: x64
+          - os: windows-11-arm
+            architecture: arm64
+            python_architecture: arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: ${{ matrix.python_architecture }}
+      - name: Verify the full source suite
+        run: python -m unittest discover -s tests -v
+        env:
+          PYTHONPATH: src
+          PYTHONDONTWRITEBYTECODE: '1'
+      - name: Build the self-contained native package
+        run: python scripts/build_windows_bundle.py --architecture ${{ matrix.architecture }}
+      - name: Extract within the disposable runner workspace
+        run: Expand-Archive -LiteralPath 'dist/Kshetrajna-Windows-${{ matrix.architecture }}.zip' -DestinationPath 'build/package-smoke'
+      - name: Run the packaged interpreter and application
+        run: python scripts/smoke_windows_bundle.py --bundle build/package-smoke/Kshetrajna --architecture ${{ matrix.architecture }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Kshetrajna-Windows-${{ matrix.architecture }}
+          path: |
+            dist/Kshetrajna-Windows-${{ matrix.architecture }}.zip
+            dist/Kshetrajna-Windows-${{ matrix.architecture }}.zip.sha256
+          if-no-files-found: error

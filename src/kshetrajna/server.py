@@ -3,6 +3,7 @@
 import hmac
 import json
 import secrets
+import threading
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
@@ -22,6 +23,8 @@ class DashboardServer(ThreadingHTTPServer):
         self.service = AssistantService(collector, config, store, demo=demo)
         self.chat = ChatAssistant(self.service)
         self.file_service = None
+        self.shutdown_gate = threading.Lock()
+        self.shutdown_requested = False
         collector.service = self.service
         super().__init__(("127.0.0.1", port), DashboardHandler)
 
@@ -210,7 +213,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length))
             if not isinstance(body, dict):
                 raise ValueError("Request body must be a JSON object")
-            if path == "/api/settings":
+            if path == "/api/shutdown":
+                if body.get("confirm") is not True or set(body) != {"confirm"}:
+                    raise ValueError("Explicit shutdown confirmation is required")
+                self._json(200, {"status": "shutting_down"})
+                with self.server.shutdown_gate:
+                    if not self.server.shutdown_requested:
+                        self.server.shutdown_requested = True
+                        threading.Thread(target=self.server.shutdown, daemon=True).start()
+            elif path == "/api/settings":
                 with self.server.collector._gate:
                     result = self.server.collector.update_settings(body)
                     service.tick()

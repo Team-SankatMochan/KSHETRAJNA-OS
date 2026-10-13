@@ -2,13 +2,21 @@
 
 > **The intelligence that knows the field.**
 
-A local Windows workload and file assistant that observes app activity, indexes local files, recognizes workflows, explains resource recommendations, asks for consent, and records outcomes and rollback. This is the end-to-end hackathon prototype, version 0.3.
+A local Windows workload and file assistant that observes app activity, indexes local files, recognizes workflows, explains resource recommendations, asks for consent, and records outcomes and rollback. This is the end-to-end hackathon prototype, version 0.4.
 
 **Experimental integration snapshot:** Sort AI and the Jarvis bridge are staged
 for device testing. This is not a release-qualified build. Historical pitch
 assets are retained once under [`submission/`](submission/README.md).
 
 ## Run the submission now
+
+### Self-contained Windows bundles
+
+Version 0.4 adds native x64 and ARM64 packages containing Python and the app.
+Extract a package and open **Launch.cmd**, or use **Install.cmd** for a verified
+per-user copy and optional desktop shortcut. Use **Quit Kshetrajna** in Privacy
+to stop the background application. See [packaging and verification](docs/WINDOWS_BUNDLES.md).
+These are unsigned archives; a compatible local model remains optional and separate.
 
 ### Run on your own Windows PC
 

@@ -13,6 +13,7 @@ let currentSettings = null;
 let currentMode = 'live';
 let refreshing = false;
 let toastTimer;
+let appStopped = false;
 
 async function request(path, options = {}) {
   const response = await fetch(path, { cache: 'no-store', ...options });
@@ -184,5 +185,16 @@ $('delete-button').addEventListener('click', async () => {
   try { await post('/api/delete'); await refresh(); setFeedback('Recorded history deleted.'); }
   catch (error) { setFeedback(error.message, true); }
 });
+$('quit-button').addEventListener('click', async () => {
+  if (!window.confirm('Quit Kshetrajna? Collection will stop and active priority trials will attempt restoration. Your stored history and files remain.')) return;
+  try {
+    await post('/api/shutdown', { confirm: true });
+    appStopped = true;
+    $('quit-button').disabled = true;
+    $('capture-button').disabled = true;
+    $('status-text').textContent = 'Stopping local app';
+    setFeedback('Shutdown requested. The local app is stopping and attempting to restore active trials. Restart it to reconnect.');
+  } catch (error) { setFeedback(error.message, true); }
+});
 refresh();
-setInterval(refresh, 2000);
+setInterval(() => { if (!appStopped) refresh(); }, 2000);
