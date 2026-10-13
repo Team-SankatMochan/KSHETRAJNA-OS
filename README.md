@@ -10,6 +10,18 @@ assets are retained once under [`submission/`](submission/README.md).
 
 ## Run the submission now
 
+### Run on your own Windows PC
+
+The hosted page includes **Run on your PC** with a public source download and
+setup steps. Install Python 3.13 (x64 for Intel/AMD, ARM64 for Snapdragon),
+extract the download, and double-click **start_here.cmd**. The launcher selects
+an installed Python 3.13 and opens your own local dashboard. No Git or account
+is required. See [Windows quick start](docs/WINDOWS_QUICKSTART.md).
+
+Enable collection and the desired action controls locally. Ollama plus an
+installed local model is optional for AI conversation; real PC tools can run
+without it. This distribution requires Python and is not a standalone installer.
+
 ### Host the interactive demo on Vercel
 
 Import this repository from **experimental/sort-ai-jarvis**, choose **Other**,

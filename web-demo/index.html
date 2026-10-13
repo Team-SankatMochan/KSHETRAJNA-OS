@@ -11,7 +11,7 @@
 <body>
   <aside class="sidebar">
     <a class="brand" href="#"><span class="brand-mark">K</span><span>Kshetrajna<small>THE KNOWER OF THE FIELD</small></span></a>
-    <div class="edition">INTERACTIVE WEB DEMO</div>
+    <div class="edition">WEB DEMO + WINDOWS APP</div>
     <nav aria-label="Explore the demo">
       <button class="nav-item active" data-prompt="Show my PC overview"><span>◈</span> Overview</button>
       <button class="nav-item" data-prompt="Help me free RAM"><span>✧</span> Assistant</button>
@@ -24,7 +24,18 @@
   </aside>
   <main>
     <header><span>YOUR WORKSPACE / OVERVIEW</span><div class="header-actions"><span class="demo-badge">SIMULATED DATA</span><button id="reset" class="quiet">Reset demo</button></div></header>
-    <section class="intro"><div><div class="eyebrow">CONTEXT BEFORE CONTROL</div><h1>Your field, understood.</h1><p>A calmer way to manage your Windows workspace.<br>Observe, understand, review — then act.</p></div><a class="local-link" href="http://127.0.0.1:8765/#chat">Open running local app ↗<small>Requires run_chat.cmd on your laptop</small></a></section>
+    <section class="intro"><div><div class="eyebrow">CONTEXT BEFORE CONTROL</div><h1>Your field, understood.</h1><p>A calmer way to manage your Windows workspace.<br>Observe, understand, review — then act.</p></div><a class="local-link" href="#local-setup">Run on your PC ↓<small>Real data and reviewed Windows actions</small></a></section>
+    <section id="local-setup" class="local-setup" aria-labelledby="setup-title">
+      <div class="setup-heading"><div><div class="eyebrow">YOUR COMPUTER · YOUR DATA</div><h2 id="setup-title">Use the full app on your Windows laptop.</h2><p>Start it once on your own PC. Your dashboard, telemetry and approved actions run locally.</p></div><span class="demo-badge">WINDOWS x64 / ARM64</span></div>
+      <div class="setup-steps">
+        <article><span class="step-number">01</span><h3>Install Python 3.13</h3><p>Choose <strong>Windows 64-bit</strong> for Intel or AMD, or <strong>ARM64</strong> for Snapdragon. Skip this if Python 3.13 is installed.</p><a href="https://www.python.org/downloads/release/python-31316/" target="_blank" rel="noopener noreferrer">Get Python from python.org ↗</a></article>
+        <article><span class="step-number">02</span><h3>Download & start Kshetrajna</h3><p>Download the source bundle, choose <strong>Extract All</strong>, then open <strong>start_here.cmd</strong> in the extracted folder. Keep its window open while using the app.</p><a class="download-app" href="https://github.com/Team-SankatMochan/KSHETRAJNA-OS/archive/refs/heads/experimental/sort-ai-jarvis.zip">Download Windows app source ↓</a></article>
+        <article><span class="step-number">03</span><h3>Open your local dashboard</h3><p>The launcher opens it automatically. Enable collection and the desired controls in Privacy. Review and approve each action on your computer.</p><a href="http://127.0.0.1:8765/#chat" target="_blank" rel="noopener noreferrer">Open my local dashboard ↗</a></article>
+      </div>
+      <details><summary>Optional: add AI conversation, without an API key</summary><p>Install <a href="https://ollama.com/download/windows" target="_blank" rel="noopener noreferrer">Ollama for Windows</a> and download a local model suitable for your device. Start Kshetrajna, select the installed model in Chat, and enable local AI. Live PC tools work without a model. Model speed and runtime compatibility depend on your hardware; Snapdragon inference needs separate device testing.</p></details>
+      <details><summary>Setup help, updates and stopping the app</summary><p>If the local page cannot be reached, start <strong>start_here.cmd</strong> first and check its window for errors. If Python is missing, install 3.13 and rerun. If port 8765 is busy, use <strong>start_here.cmd --port 8767</strong> and open the address printed by the launcher. To stop, press Ctrl+C in its window. Download and extract a fresh bundle for updates; history stays in your Windows user profile. <a href="https://github.com/Team-SankatMochan/KSHETRAJNA-OS/blob/experimental/sort-ai-jarvis/docs/WINDOWS_QUICKSTART.md" target="_blank" rel="noopener noreferrer">Full setup guide ↗</a></p></details>
+      <p class="setup-boundary">This is a source distribution with a Python prerequisite, not a packaged installer. The hosted site does not receive your local dashboard data or control your PC. The button opens the app on the device you are browsing from.</p>
+    </section>
     <div class="notice"><span>◌</span><p><strong>Explore with sample data.</strong> This hosted demo uses scripted chat replies and simulated actions. Live telemetry, file access, PC control and an installed local AI model run in the Windows app.</p></div>
     <section class="metrics" aria-label="Synthetic system metrics">
       <article class="metric"><span>CPU usage <small>DEMO</small></span><div><strong>24<span>%</span></strong><svg viewBox="0 0 110 35" aria-hidden="true"><path d="M0 30 L12 24 L20 26 L30 12 L40 19 L49 10 L60 16 L70 6 L80 13 L91 12 L110 17"/></svg></div><p>Current workload · Developing</p></article>

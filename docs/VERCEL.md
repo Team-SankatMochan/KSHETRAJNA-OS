@@ -43,6 +43,12 @@ disable its origin/token checks to make the hosted demo appear live.
 
 ## Run the real application
 
+The public page now has **Run on your PC** onboarding, a source-download link,
+Python architecture instructions, optional Ollama setup, troubleshooting, and
+an **Open my local dashboard** link. Visitors follow
+[the Windows quick start](WINDOWS_QUICKSTART.md) and double-click `start_here.cmd`
+on their own computer. The hosted site does not install or run the agent.
+
 Clone/pull the repository, install Python 3.13 for your Windows architecture,
 and run `run_chat.cmd`. For AI conversation, separately install Ollama and
 an appropriate local model. Select the installed model and enable local AI

@@ -2,6 +2,14 @@
 
 ## Update: 14 October 2026 — Vercel demo
 
+- Public local-PC onboarding now includes source download, Python architecture
+  guidance, optional local-model setup, troubleshooting and a local dashboard
+  link. The source-download URL returned HTTP 200. The setup section and its
+  expanded AI guidance were checked in the browser and visually inspected.
+- `start_here.cmd --help` passed on Windows x64. A launch with `--demo
+  --no-browser --port 8802` served the real local dashboard successfully in
+  synthetic mode. No personal PC action or permanent installation was performed.
+
 - Added an isolated static `web-demo` and root Vercel configuration. No cloud
   model, Windows control endpoint or personal telemetry is part of that site.
 - Node syntax validation and repository whitespace checks passed.
