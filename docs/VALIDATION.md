@@ -14,7 +14,12 @@
 - GitHub run `38468264761` passed Linux and Windows ARM64. Windows x64 exposed
   the same wide-integer issue in the post-action file-identity fields. The
   lossless storage codec and round-trip regression now cover both expected and
-  post-action device/inode values; the corrected commit must pass a fresh run.
+  post-action device/inode values.
+- Corrected code commit `2a0441b` passed all three jobs in
+  [GitHub run 38469748864](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/actions/runs/38469748864):
+  Windows x64, Windows ARM64 (including the native-ARM64 diagnostic step),
+  and Linux. This is hosted-runner compatibility evidence, not a Snapdragon
+  performance benchmark or a validation of local model inference on that device.
 
 ## Update: 13 October 2026 — local assistant
 

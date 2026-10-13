@@ -14,8 +14,11 @@ The repository contains two intentionally separate applications:
 1. Import `Team-SankatMochan/KSHETRAJNA-OS` in Vercel.
 2. Select **experimental/sort-ai-jarvis**, which contains this integration.
    If the integration is merged later, use the branch containing that merge.
-   For an existing project, set its Production Branch under Git settings or
-   create a deployment from this branch.
+   Vercel initially defaults to `main`. Change **Project Settings → Environments
+   → Production → Branch Tracking** to `experimental/sort-ai-jarvis`, then
+   create a deployment from that branch. You can also create a preview from
+   this Git reference under the project's Deployments page. See the
+   [official Git deployment guide](https://vercel.com/docs/git).
 3. Set **Framework Preset: Other** and **Root Directory: repository root**
    (leave the directory field empty).
 4. The committed root `vercel.json` sets an empty install command, an empty
