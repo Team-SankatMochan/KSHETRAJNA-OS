@@ -13,8 +13,27 @@
 - New file-action checks reject undo/recovery after the target is replaced with
   a different file of identical size and timestamp. Recovery also revalidates
   approved paths and normalizes catalog extensions.
-- Native x64/ARM64 CI package verification and public release publication are
-  required before making release-qualified packaging claims.
+- Commit `b0fa11d` passed all three source jobs in
+  [run 38474805570](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/actions/runs/38474805570):
+  Windows x64, native Windows ARM64 and Linux.
+- Both native Windows package jobs passed in
+  [run 38474805694](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/actions/runs/38474805694),
+  including the 129-test suite and actual bundled-interpreter diagnostics,
+  isolated live/demo launch, asset loading and approved graceful shutdown.
+- The exact tested clean-source archives were published in the
+  [v0.4.0 beta release](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/tag/v0.4.0).
+  A post-build audit verified every file against its manifest, source commit,
+  archive checksum and exclusion of local databases/configuration/logs.
+  Archive SHA-256: x64 `dad190d3ce244a3c4743ea437d8925d3fc9ba4a675c479dcf2699b872ab82b53`;
+  ARM64 `773e76cee0f965ab7256996a6c4866ef152b4fe89a5a8b7ab7aa62d496860a09`.
+- The published x64 artifact was installed under the current user's Programs
+  directory, verified again, and given a version-specific Desktop shortcut.
+  Its installed interpreter passed read-only diagnostics and isolated live/demo
+  dashboard checks. The shortcut's windowless entry point separately passed
+  isolated live launch and approved Quit, with collection disabled throughout.
+  Existing personal history was not modified; test instances were stopped.
+- Updated public onboarding with both existing release links was checked in
+  the browser and visually inspected, including expanded optional-AI guidance.
 
 ## Update: 14 October 2026 — Vercel demo
 
@@ -112,16 +131,14 @@ Snapdragon computer. See [device setup and interpretation](SNAPDRAGON.md).
 2. Run `run_demo.cmd` and follow `SUBMISSION.md` for the demo flow.
 3. Run `run.cmd` for real Windows observations; explicitly enable collection in Privacy controls. Live priority trials remain off unless separately enabled and individually approved.
 
-## Qualification still required
+## Current qualification still required
 
-- Native ARM64/Snapdragon diagnostics are not independently reproduced in this checkout; the submission materials contain a user-confirmed report of the earlier 61-test suite on an ARM64 laptop, but no committed device-check artifact.
+- Native ARM64 CI diagnostics passed; specific Snapdragon device measurements and external model inference still need on-device checks. The historical 61-test user report is separate evidence.
 - Real process priority changes were not executed against user applications during validation; native behavior was tested with controlled doubles.
-- CI configuration is included, but a remote CI run has not been observed.
-- No controlled benchmark, battery measurement, production security audit or installer qualification has been completed.
+- Remote source and native package CI passed as linked above. No controlled device performance benchmark, battery measurement or production security audit has been completed.
 - Workspace adaptation currently changes the dashboard board. It does not arrange desktop windows or launch applications.
 - Sort AI uses deterministic path, sibling, metadata, and bounded local text heuristics for purpose/action explanations and cautious review prompts; it is not semantic model inference and cannot guarantee truth from a 4 KiB preview. No model download, NPU runtime, or accelerated provider is included.
-- No signed installer or packaged x64/ARM64 artifact has been qualified.
-- The runner does not have `pip`, so a wheel build could not be executed here; source launch remains the verified deployment path.
+- The unsigned self-contained x64/ARM64 artifacts passed native package checks. Signed MSI/EXE installers, auto-updates and model/NPU qualification are not implemented.
 - Recovery restores the selected process. Descendant inheritance and recovery while the app remains crashed need further engineering.
 
 This is an end-to-end hackathon prototype covering the project phases, with these limits stated explicitly; it is not a production operating system.

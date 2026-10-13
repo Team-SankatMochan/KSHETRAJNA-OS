@@ -11,7 +11,9 @@ selected model and hardware.
    `llama3.1:8b` installed. Other devices need their own compatible runtime and
    model. Install from https://ollama.com/download if needed; choosing and
    downloading a model remains a user action.
-2. Launch `run_chat.cmd`, or start Ollama separately and launch `run.cmd`.
+2. Start Ollama separately and open **Launch.cmd** from a Windows bundle.
+   For a source checkout, `run_chat.cmd` can start an already installed Ollama
+   runtime; `run.cmd` also works when Ollama is already running.
 3. Open **Chat**, choose an installed model, and enable local AI after reviewing
    its consent message. Model selection and the opt-in are saved locally.
 4. Enable live collection to inspect this PC. Demo readings and actions remain
@@ -109,7 +111,8 @@ not claim to erase memory or logs owned by that runtime.
 ## Snapdragon / ARM64
 
 The Python client and process bindings use the project's standard-library and
-pointer-sized Windows declarations. This integration was tested on Windows x64.
+pointer-sized Windows declarations. The source suite and packaged application
+passed native Windows x64 and ARM64 CI. Local model replies were checked on x64.
 The external Ollama runtime is a separate compatibility requirement: its
 official Windows documentation currently describes AMD64 distribution. Verify
 the runtime available on the Snapdragon device, or its emulation behavior,

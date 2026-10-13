@@ -4,35 +4,36 @@
 
 A local Windows workload and file assistant that observes app activity, indexes local files, recognizes workflows, explains resource recommendations, asks for consent, and records outcomes and rollback. This is the end-to-end hackathon prototype, version 0.4.
 
-**Experimental integration snapshot:** Sort AI and the Jarvis bridge are staged
-for device testing. This is not a release-qualified build. Historical pitch
-assets are retained once under [`submission/`](submission/README.md).
+**Public Windows beta:** Source tests and packaged-app checks passed on native
+Windows x64 and ARM64. System modifications remain experimental and individually
+approved. Historical pitch assets are retained under [`submission/`](submission/README.md).
 
 ## Run the submission now
 
 ### Self-contained Windows bundles
 
 Version 0.4 adds native x64 and ARM64 packages containing Python and the app.
+Download [Intel/AMD x64](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.0/Kshetrajna-Windows-x64.zip)
+or [Snapdragon/ARM64](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.0/Kshetrajna-Windows-arm64.zip).
 Extract a package and open **Launch.cmd**, or use **Install.cmd** for a verified
 per-user copy and optional desktop shortcut. Use **Quit Kshetrajna** in Privacy
 to stop the background application. See [packaging and verification](docs/WINDOWS_BUNDLES.md).
 These are unsigned archives; a compatible local model remains optional and separate.
 
-### Run on your own Windows PC
+### Run from source on your own Windows PC
 
-The hosted page includes **Run on your PC** with a public source download and
-setup steps. Install Python 3.13 (x64 for Intel/AMD, ARM64 for Snapdragon),
-extract the download, and double-click **start_here.cmd**. The launcher selects
+The source option requires Python 3.13 (x64 for Intel/AMD, ARM64 for Snapdragon).
+Extract the source download and double-click **start_here.cmd**. The launcher selects
 an installed Python 3.13 and opens your own local dashboard. No Git or account
 is required. See [Windows quick start](docs/WINDOWS_QUICKSTART.md).
 
 Enable collection and the desired action controls locally. Ollama plus an
 installed local model is optional for AI conversation; real PC tools can run
-without it. This distribution requires Python and is not a standalone installer.
+without it. Only the source distribution requires a separate Python installation.
 
 ### Host the interactive demo on Vercel
 
-Import this repository from **experimental/sort-ai-jarvis**, choose **Other**,
+Import this repository from **main** (or **experimental/sort-ai-jarvis**), choose **Other**,
 and leave Root Directory at the repository root. The committed `vercel.json`
 serves **web-demo** without an install or build step. No API keys are needed.
 See [Vercel setup](docs/VERCEL.md) for the exact settings.
@@ -45,7 +46,8 @@ AI run on the laptop through the launchers below.
 
 Run **run_chat.cmd** to start the installed Ollama runtime and the application.
 Open **Chat**, select an installed local model, and choose **Enable local AI**.
-This computer already has `llama3.1:8b`; no model was downloaded for this integration.
+The development machine already had `llama3.1:8b`; other devices need their own
+compatible runtime and model. For bundles, start Ollama and open **Launch.cmd**.
 Chat supports normal conversation, current system inspection, memory review,
 temporary-file cleanup, Store cache tools, and reviewed app closure. Enable
 the corresponding action controls in Privacy, then approve each review card.
@@ -103,7 +105,7 @@ SQLite is not application-encrypted. The boundary is the current Windows user pr
 
 **Python 3.13 + standard library**, **ctypes/Win32**, **SQLite**, and **HTML/CSS/JavaScript/SVG**. There are zero runtime package dependencies. This keeps the project offline-capable and avoids architecture-specific third-party wheels. A small local HTTP server hosts the dashboard; it is not designed for public deployment.
 
-On Snapdragon X, use a native ARM64 Python build. The Windows API bindings use pointer-sized handles and counters. The official Python 3.13 ARM64 installer is labeled experimental. The supplied submission brief reports a user-confirmed 61-test ARM64 run; the current integration checks were run on Linux x86_64, and the earlier Windows x64 validation is historical. No ARM64 diagnostic report is committed here. Follow [the device checks](docs/SNAPDRAGON.md) before making native performance or actuation claims.
+On Snapdragon X, use the ARM64 bundle or native ARM64 Python for source launch. The Windows API bindings use pointer-sized handles and counters. The 129-test source suite and packaged interpreter/dashboard passed native Windows ARM64 CI, including read-only diagnostics. The supplied submission brief separately reports an earlier user-confirmed 61-test Snapdragon run. Generic ARM64 runner compatibility is not a Snapdragon model-speed or battery benchmark. Follow [the device checks](docs/SNAPDRAGON.md) for your laptop.
 
 ## Tests
 
@@ -181,6 +183,6 @@ docs/                architecture and original vision
 
 ## Next engineering milestones
 
-A committed native ARM64 diagnostic record, controlled performance experiments, production packaging and signing, encrypted storage, stronger process ownership checks, descendant-aware recovery, real desktop window placement/launch integration, and a validated learned context model remain future work. Sort AI is now integrated as a deterministic local provider; a semantic model provider is intentionally not claimed. See the [feature matrix](docs/FEATURE_MATRIX.md) for exact phase boundaries.
+Specific Snapdragon device measurements, controlled performance experiments, signed production installers, encrypted storage, descendant-aware recovery, real desktop window placement/launch integration, and a validated learned context model remain future work. Sort AI is integrated as a deterministic local provider; semantic embeddings and NPU inference are not implemented. See the [feature matrix](docs/FEATURE_MATRIX.md) for exact phase boundaries.
 
 MIT license. See [LICENSE](LICENSE).

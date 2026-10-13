@@ -13,7 +13,17 @@ Target: **Windows 11 on ARM64, native CPython 3.13.x ARM64** (standard GIL build
 | Native priority trials | Opt-in, user-approved, off by default | Logic tested with doubles; real ARM64 actuation not independently qualified |
 | Qualcomm NPU | Not used | No NPU/TOPS score or acceleration claim |
 
-The design is ARM64-compatible, but the reproducible development report in this checkout is x64. The supplied submission brief reports a user-confirmed 61-test run on an HP Snapdragon X ARM64 laptop; no matching ARM64 device-check JSON is committed here, so that report should not be expanded into performance or native-actuation claims. **Snapdragon hardware performance remains unmeasured until you run the device check.** x64 Python can run through Windows 11 emulation; its results are not native ARM64 results. The checker uses IsWow64Process2 to distinguish these cases.
+The 129-test source suite and the self-contained ARM64 package passed on a native Windows ARM64 CI runner, including read-only telemetry diagnostics. The supplied submission brief separately reports an earlier user-confirmed 61-test run on an HP Snapdragon X laptop. Generic ARM64 CI does not reproduce that device or measure its model speed, battery or NPU. **Snapdragon hardware performance needs on-device measurements.** x64 Python can run through Windows emulation; its results are not native ARM64 results. The checker uses IsWow64Process2 to distinguish these cases.
+
+## Download the native package
+
+Download the [v0.4.0 ARM64 archive](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.0/Kshetrajna-Windows-arm64.zip), extract it and open **Launch.cmd**. Native ARM64 Python is included. Optional **Install.cmd** creates a verified per-user copy and shortcut. See [Windows quick start](WINDOWS_QUICKSTART.md).
+
+From the extracted Kshetrajna folder, run the read-only device check:
+
+```powershell
+.\runtime\python.exe -B -m kshetrajna.diagnostics --live --require-native-arm64 --output device-check.json
+```
 
 ## Pull and run on the Snapdragon computer
 
@@ -33,7 +43,7 @@ python --version
 
 No pip/npm install or administrator access is needed for the source launch. If you installed several Pythons, activate an ARM64 3.13 virtual environment first so `python` selects it.
 
-The device check takes six read-only telemetry samples and runs a fixed 12,000-sample prediction benchmark. The current repository test suite contains 85 tests; the submission materials refer to the earlier 61-test suite that was reportedly run on ARM64. It does not enable continuous collection, modify process priorities or load your recorded history. It writes `reports/device-check.json`, which Git ignores. A nonzero exit means a required check failed; the JSON identifies it. Do not describe an emulated result as native.
+The device check takes six read-only telemetry samples and runs a fixed 12,000-sample prediction benchmark. The current repository suite contains 129 tests; the submission materials refer to an earlier 61-test device run. The check does not enable continuous collection, modify priorities or load saved history. The source launcher writes `reports/device-check.json`, which Git ignores. A nonzero exit means a required check failed; the JSON identifies it. Do not describe an emulated result as native.
 
 The live app opens http://127.0.0.1:8765/. On a fresh computer, choose **Enable collection**. History belongs to that Windows user at `%LOCALAPPDATA%\Kshetrajna`, independently of the repo and this development computer. Keep priority trials off for initial qualification.
 
@@ -57,9 +67,10 @@ Use two or three everyday apps for several minutes. Confirm foreground names cha
 
 **Pull and run locally is the intended deployment.** The application already has a browser interface backed by a local Windows collector. A publicly hosted page cannot call the user's Win32 APIs or inspect arbitrary processes. Cloud hosting could offer a landing page or a separate synthetic demo, but real telemetry would still require a local agent and additional authentication/privacy design. Do not expose this prototype HTTP service beyond loopback.
 
-CI includes Windows x64 and Linux tests. The Windows ARM64 job is conditional
-on public repository visibility and hosted-runner availability. Check the
-actual workflow result before treating it as platform qualification.
+The current [source CI](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/actions/runs/38474805570)
+passed Windows x64, Windows ARM64 and Linux. The exact released packages passed
+[native x64/ARM64 package CI](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/actions/runs/38474805694).
+Device-specific performance and external local inference remain separate checks.
 
 ## References
 

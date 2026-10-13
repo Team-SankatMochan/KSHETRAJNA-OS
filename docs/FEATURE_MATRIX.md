@@ -1,8 +1,8 @@
 # Feature and phase matrix
 
 This matrix describes the implementation in this checkout. “Verified” means
-covered by automated tests or a read-only local check. Windows-only behavior is
-marked separately when this Linux development session cannot execute it.
+covered by automated tests or a read-only local check. Native package checks
+passed on Windows x64 and ARM64 CI; user-app mutations remain fixture-tested.
 
 | Phase | Capability | Status | Evidence / boundary |
 |---|---|---|---|
@@ -23,7 +23,7 @@ marked separately when this Linux development session cannot execute it.
 | 9 | Local model conversation, streaming/cancellation, review-only tool planning and approved app controls | Implemented; Windows x64 fixture and local-model verification | Existing Ollama model, no API key/cloud calls; separate consent; closure/termination has no undo |
 | 9 | Semantic file embeddings / Snapdragon NPU provider | Not implemented | Core rule engine remains functional; external model runtime has its own ARM64 compatibility requirements |
 | 10 | Loopback service, Host/Origin/token checks, body bounds, static asset allowlist, local audit and migration | Verified | SQLite files are not application-encrypted |
-| 11 | Source launchers and ARM64/x64 setup path | Source launchers verified; installer/artifact qualification pending | Native ARM64 Python is the documented Snapdragon path |
+| 11 | Self-contained Windows x64/ARM64 archives, per-user verified setup, desktop shortcut, source launchers, graceful quit | 129-test suite and exact packaged-app checks passed on matching native Windows runners; v0.4.0 beta published | Python included; unsigned archives/setup; local model and NPU qualification separate |
 | Integration | Local Jarvis package, loopback HTTP client, JSON-lines bridge, preview/apply/undo commands | Verified with controlled HTTP and fixture tests | Apply/undo require explicit confirmation; no arbitrary shell or remote URL support |
 
 ## Acceptance journeys
@@ -31,6 +31,6 @@ marked separately when this Linux development session cannot execute it.
 Journeys 1–10 and 12–13 are represented by the source, dashboard paths, and
 tests in this repository. Journey 11 currently means saving and activating a
 dashboard board, not arranging native desktop windows. Journey 14 is a
-documented source-launch path rather than a signed installer. Native ARM64
-qualification must be rerun on the HP Snapdragon laptop because this checkout
-cannot reproduce that hardware session.
+self-contained native x64/ARM64 download and per-user setup path. Packages are
+unsigned; signing and a production installer remain future work. Specific
+Snapdragon laptop performance still needs on-device measurements.

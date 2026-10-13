@@ -12,13 +12,10 @@ The repository contains two intentionally separate applications:
 ## Deploy from GitHub
 
 1. Import `Team-SankatMochan/KSHETRAJNA-OS` in Vercel.
-2. Select **experimental/sort-ai-jarvis**, which contains this integration.
-   If the integration is merged later, use the branch containing that merge.
-   Vercel initially defaults to `main`. Change **Project Settings → Environments
-   → Production → Branch Tracking** to `experimental/sort-ai-jarvis`, then
-   create a deployment from that branch. You can also create a preview from
-   this Git reference under the project's Deployments page. See the
-   [official Git deployment guide](https://vercel.com/docs/git).
+2. Select **main** for production. The integration is also maintained on
+   **experimental/sort-ai-jarvis** for previews. If an existing Vercel project
+   tracks another branch, update its Production Branch Tracking to main.
+   See the [official Git deployment guide](https://vercel.com/docs/git).
 3. Set **Framework Preset: Other** and **Root Directory: repository root**
    (leave the directory field empty).
 4. The committed root `vercel.json` sets an empty install command, an empty
@@ -43,11 +40,13 @@ disable its origin/token checks to make the hosted demo appear live.
 
 ## Run the real application
 
-The public page now has **Run on your PC** onboarding, a source-download link,
-Python architecture instructions, optional Ollama setup, troubleshooting, and
-an **Open my local dashboard** link. Visitors follow
-[the Windows quick start](WINDOWS_QUICKSTART.md) and double-click `start_here.cmd`
-on their own computer. The hosted site does not install or run the agent.
+The public page has **Run on your PC** onboarding with tested self-contained
+x64/ARM64 release downloads, optional Ollama setup, troubleshooting and an
+**Open my local dashboard** link. Visitors follow
+[the Windows quick start](WINDOWS_QUICKSTART.md), extract their download and
+open **Launch.cmd**. Python is included; **Install.cmd** optionally creates a
+verified per-user copy and desktop shortcut. The site does not install or run
+the agent itself. The source-download alternative remains available.
 
 Clone/pull the repository, install Python 3.13 for your Windows architecture,
 and run `run_chat.cmd`. For AI conversation, separately install Ollama and
