@@ -70,13 +70,15 @@ class FileActionManager:
         """
         Create a file mutation proposal.
         """
-        if kind not in ("RENAME", "MOVE"):
+        if kind not in ("RENAME", "MOVE", "DELETE"):
             raise ValueError(f"Invalid action kind: {kind}")
             
         with self.store._connect() as db:
-            file_row = db.execute("SELECT r.path as root_path, f.root_id, f.relative_path, f.name FROM files f JOIN roots r ON f.root_id = r.id WHERE f.id=?", (file_id,)).fetchone()
+            file_row = db.execute("SELECT r.path as root_path, f.root_id, f.relative_path, f.name, f.is_directory FROM files f JOIN roots r ON f.root_id = r.id WHERE f.id=?", (file_id,)).fetchone()
             if not file_row:
                 raise ValueError("File not found")
+            if file_row["is_directory"]:
+                raise ValueError("Directories cannot be deleted or moved by a file action")
                 
         if not destination_relative or destination_relative.strip() == "":
             raise ValueError("Destination cannot be empty")
@@ -94,6 +96,10 @@ class FileActionManager:
                 parent = (Path(file_row["root_path"]) / dest_rel).parent
                 if not parent.exists() or not parent.is_dir():
                     raise ValueError("Destination directory does not exist")
+        else:
+            # A delete action keeps the original relative path as its durable
+            # target so startup recovery can determine whether it completed.
+            dest_rel = file_row["relative_path"]
             
         # Opaque IDs
         action_id = secrets.token_urlsafe(16)
@@ -206,7 +212,14 @@ class FileActionManager:
                 
         # Demo simulation check
         if action["mode"] == "demo":
-            # Simulate success
+            if action["kind"] == "DELETE":
+                with self.store._connect() as db:
+                    db.execute(
+                        "UPDATE file_actions SET status=?, prepared_at=?, applied_at=?, file_id=NULL WHERE id=?",
+                        ("deleted", self._iso(now), self._iso(now), action["id"]),
+                    )
+                    db.execute("DELETE FROM files WHERE id=?", (action["file_id"],))
+                return {"status": "deleted", "message": "SIMULATED PERMANENT DELETE"}
             self.store.update_file_action(action["id"], {"status": "applied", "prepared_at": self._iso(now), "applied_at": self._iso(now)})
             return {"status": "applied", "message": "SIMULATED FILE ACTION"}
 
@@ -234,9 +247,30 @@ class FileActionManager:
             raise ValueError("Source file missing")
             
         if abs_dest.exists():
-            self.store.update_file_action(action["id"], {"status": "failed", "error": "Destination exists"})
-            raise ValueError("Destination exists")
-            
+            if action["kind"] == "DELETE" and abs_dest == abs_source:
+                pass
+            else:
+                self.store.update_file_action(action["id"], {"status": "failed", "error": "Destination exists"})
+                raise ValueError("Destination exists")
+
+        # A delete is irreversible by design. It still receives the same
+        # journal-before-mutation and identity checks as a move, but its file
+        # catalog row is removed only in the transaction that marks it deleted.
+        if action["kind"] == "DELETE":
+            self.store.update_file_action(action["id"], {"status": "prepared", "prepared_at": self._iso(self._now())})
+            try:
+                os.remove(abs_source)
+            except BaseException as e:
+                self.store.update_file_action(action["id"], {"status": "failed", "error": str(e)})
+                raise ValueError(f"Deletion failed: {e}")
+            with self.store._connect() as db:
+                db.execute(
+                    "UPDATE file_actions SET status=?, applied_at=?, file_id=NULL, error=NULL WHERE id=?",
+                    ("deleted", self._iso(self._now()), action["id"]),
+                )
+                db.execute("DELETE FROM files WHERE id=?", (action["file_id"],))
+            return {"status": "deleted", "message": "DELETED PERMANENTLY"}
+
         # PREPARED state
         self.store.update_file_action(action["id"], {"status": "prepared", "prepared_at": self._iso(self._now())})
         
@@ -363,6 +397,16 @@ class FileActionManager:
                 
             abs_source = root_path / action["source_relative"]
             abs_dest = root_path / action["destination_relative"]
+
+            if action["kind"] == "DELETE":
+                if abs_source.exists():
+                    self.store.update_file_action(action["id"], {"status": "failed", "error": "Reconciled: Delete did not occur"})
+                else:
+                    with self.store._connect() as db:
+                        db.execute("UPDATE file_actions SET status=?, applied_at=?, file_id=NULL WHERE id=?",
+                                   ("deleted", self._iso(self._now()), action["id"]))
+                        db.execute("DELETE FROM files WHERE id=?", (action["file_id"],))
+                continue
             
             src_exists = abs_source.exists()
             dst_exists = abs_dest.exists()

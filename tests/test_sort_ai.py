@@ -39,11 +39,16 @@ class SortAiTests(unittest.TestCase):
             self.service.delete_all()
         self.temp.cleanup()
 
+    def test_ready_scan_clears_active_scan_gate(self):
+        self.assertNotIn(self.root_id, self.service._active_scans)
+
     def test_preview_edit_apply_and_reverse_batch(self):
         plan = self.service.generate_sort_plan(self.root_id, create_folders=True)
         self.assertEqual(plan["status"], "preview")
         self.assertEqual(len(plan["suggestions"]), 2)
         self.assertTrue(all(s["selected"] for s in plan["suggestions"]))
+        self.assertTrue(all(s["content_summary"] for s in plan["suggestions"]))
+        self.assertTrue(all("supports placing it" in s["reason"] for s in plan["suggestions"]))
 
         first = plan["suggestions"][0]
         plan = self.service.update_sort_plan(plan["id"], [{
@@ -61,6 +66,26 @@ class SortAiTests(unittest.TestCase):
         self.assertEqual(undone["status"], "rolled_back")
         self.assertTrue((self.root_path / "notes.txt").exists())
         self.assertFalse((self.root_path / "Documents").exists())
+
+    def test_conversational_folder_approval_applies_only_one_idea(self):
+        plan = self.service.generate_sort_plan(self.root_id, create_folders=True)
+        code = next(s for s in plan["suggestions"] if s["destination_folder"] == "Code")
+        result = self.service.approve_sort_idea(plan["id"], folder="Code", confirm=True)
+        self.assertEqual(result["status"], "partial")
+        self.assertTrue((self.root_path / "Code" / "main.py").exists())
+        self.assertTrue((self.root_path / "notes.txt").exists())
+        self.assertEqual(result["plan"]["suggestions"][0]["destination_folder"], code["destination_folder"])
+        self.assertEqual(self.service.undo_sort_plan(plan["id"])["status"], "rolled_back")
+        self.assertTrue((self.root_path / "main.py").exists())
+        self.assertFalse((self.root_path / "Code").exists())
+
+    def test_automatic_content_decision_can_apply_its_safe_folder(self):
+        file_id = self.store.search_files("main.py")[0]["id"]
+        result = self.service.organize_file(file_id, confirm=True)
+        self.assertIn(result["status"], ("applied", "partial"))
+        self.assertTrue((self.root_path / "Code" / "main.py").exists())
+        self.service.undo_sort_plan(result["plan"]["id"])
+        self.assertTrue((self.root_path / "main.py").exists())
 
     def test_conflicts_are_visible_and_not_selected(self):
         (self.root_path / "Documents").mkdir()
@@ -184,6 +209,24 @@ class SortAiHttpTests(unittest.TestCase):
         self.assertEqual(detail["id"], plan["id"])
         status, _ = self.call("POST", "/api/files/sort/update", {"plan_id": plan["id"], "suggestions": "bad"})
         self.assertEqual(status, 400)
+
+    def test_root_add_requires_explicit_consent(self):
+        status, body = self.call("POST", "/api/files/roots/add", {"path": "C:\\Users\\Demo\\Desktop", "label": "Desktop"})
+        self.assertEqual(status, 400)
+        self.assertIn("explicit consent", body["error"])
+
+    def test_conversational_approval_endpoint_applies_one_idea(self):
+        status, plan = self.call("POST", "/api/files/sort/preview", {"root_id": self.root_id, "create_folders": True})
+        self.assertEqual(status, 200)
+        folder = plan["suggestions"][0]["destination_folder"]
+        status, result = self.call("POST", "/api/files/sort/approve-idea", {
+            "plan_id": plan["id"], "folder": folder, "confirm": True,
+        })
+        self.assertEqual(status, 200, result)
+        self.assertEqual(result["status"], "applied")
+        status, undone = self.call("POST", "/api/files/sort/undo", {"plan_id": plan["id"]})
+        self.assertEqual(status, 200, undone)
+        self.assertEqual(undone["status"], "rolled_back")
 
     def test_jarvis_http_client_reuses_dashboard_token(self):
         bridge = JarvisHttpClient(f"http://127.0.0.1:{self.server.server_port}")

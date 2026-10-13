@@ -1,4 +1,5 @@
 import os
+import stat
 import json
 import threading
 import time
@@ -8,11 +9,14 @@ from pathlib import Path, PureWindowsPath
 import logging
 
 from .file_storage import FileStore
-from .file_scanner import (walk, extract_excerpt, TEXT_EXTENSIONS, SENSITIVE_NAMES,
-                           SENSITIVE_EXTENSIONS, SENSITIVE_DIRS, ScanTruncated)
-from .file_insights import generate_insights
+from .file_scanner import (walk, extract_excerpt, extract_office_excerpt, TEXT_EXTENSIONS,
+                           ScanTruncated,
+                           is_sensitive_file, INSPECTION_VERSION)
+from .file_insights import generate_insights, analyze_catalog, OFFICE_EXTENSIONS
 from .file_actions import FileActionManager
 from .sort_ai import build_suggestions
+from .image_preview import IMAGE_EXTENSIONS, MAX_IMAGE_BYTES, inspect_image
+from .pdf_preview import PDF_EXTENSIONS, MAX_PDF_BYTES, inspect_pdf, extract_pdf_excerpt
 
 PROTECTED_PREFIXES = [
     os.environ.get('SystemRoot', r'C:\Windows').lower(),
@@ -221,6 +225,9 @@ class FileService:
                 db.execute("UPDATE scan_state SET last_pass=? WHERE root_id=?", (current_pass, root_id))
             
             root_path = Path(root["path"])
+            self.action_manager._validate_path_safety(root_path, root_path)
+            if not root_path.is_dir():
+                raise ValueError("Approved folder is unavailable")
             
             seen = 0
             new = 0
@@ -247,12 +254,13 @@ class FileService:
 
                     # Check if unchanged
                     with self.store._connect() as db:
-                        existing = db.execute("SELECT size_bytes, modified_at, excerpt FROM files WHERE root_id=? AND relative_path=?", (root_id, rel_path)).fetchone()
+                        existing = db.execute("SELECT size_bytes, modified_at, excerpt, inspection_version FROM files WHERE root_id=? AND relative_path=?", (root_id, rel_path)).fetchone()
 
                     excerpt = ""
                     mime = ""
                     if existing:
-                        if existing["size_bytes"] == size and existing["modified_at"] == mtime:
+                        if (existing["size_bytes"] == size and existing["modified_at"] == mtime
+                                and existing["inspection_version"] == INSPECTION_VERSION):
                             excerpt = existing["excerpt"]
                         else:
                             changed += 1
@@ -262,7 +270,7 @@ class FileService:
                         excerpt = self._get_excerpt(root_path / rel_path, name, ext, is_dir, rel_path)
 
                     indexed_at = datetime.now(timezone.utc).isoformat()
-                    batch.append((root_id, rel_path, name, ext, size, mtime, ctime, int(is_dir), mime, excerpt, current_pass, indexed_at))
+                    batch.append((root_id, rel_path, name, ext, size, mtime, ctime, int(is_dir), mime, excerpt, current_pass, indexed_at, INSPECTION_VERSION))
 
                     if len(batch) >= 200:
                         self._flush_batch(batch)
@@ -295,12 +303,14 @@ class FileService:
                 count = db.execute("SELECT COUNT(*) FROM files WHERE root_id=? AND is_directory=0", (root_id,)).fetchone()[0]
                 total_size = db.execute("SELECT SUM(size_bytes) FROM files WHERE root_id=? AND is_directory=0", (root_id,)).fetchone()[0] or 0
                 
-            self.store.update_root_status(root_id, status)
-            self.store.update_root_stats(root_id, count, total_size)
+            # Publish a terminal status only after the in-memory scan gate is
+            # cleared. Callers use both signals to decide whether mutations
+            # are safe, so they must become visible in the same order.
+            self._finish_scan(root_id, status, file_count=count, total_size=total_size)
             
         except Exception as e:
             logging.getLogger(__name__).exception("Scan failed")
-            self.store.update_root_status(root_id, "error", str(e))
+            self._finish_scan(root_id, "error", error=str(e))
         finally:
             with self._gate:
                 if root_id in self._active_scans:
@@ -311,29 +321,32 @@ class FileService:
     def _flush_batch(self, batch):
         with self.store._connect() as db:
             db.executemany("""
-                INSERT INTO files (root_id, relative_path, name, extension, size_bytes, modified_at, created_at, is_directory, mime_guess, excerpt, scan_pass, indexed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO files (root_id, relative_path, name, extension, size_bytes, modified_at, created_at, is_directory, mime_guess, excerpt, scan_pass, indexed_at, inspection_version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(root_id, relative_path) DO UPDATE SET
                     size_bytes=excluded.size_bytes,
                     modified_at=excluded.modified_at,
                     excerpt=excluded.excerpt,
                     scan_pass=excluded.scan_pass,
-                    indexed_at=excluded.indexed_at
+                    indexed_at=excluded.indexed_at,
+                    inspection_version=excluded.inspection_version
             """, batch)
 
     def _get_excerpt(self, full_path: Path, name: str, ext: str, is_dir: bool, rel_path: str) -> str:
         if is_dir:
             return ""
             
-        if name in SENSITIVE_NAMES or ext in SENSITIVE_EXTENSIONS:
-            return ""
-            
-        parts = rel_path.split('/')
-        if any(d in SENSITIVE_DIRS for d in parts):
+        if is_sensitive_file(name, ext, rel_path):
             return ""
             
         if ext in TEXT_EXTENSIONS:
             return extract_excerpt(full_path)
+        if ext in OFFICE_EXTENSIONS:
+            return extract_office_excerpt(full_path)
+        if ext in PDF_EXTENSIONS:
+            if full_path.stat().st_size > MAX_PDF_BYTES:
+                return ""
+            return extract_pdf_excerpt(full_path.read_bytes())
             
         return ""
 
@@ -380,17 +393,36 @@ class FileService:
         with self._gate:
             self.store.clear_all()
 
-    @staticmethod
-    def _sort_plan_view(plan: dict) -> dict:
+    def _sort_plan_view(self, plan: dict) -> dict:
         result = dict(plan)
+        root = self.store.get_root(result["root_id"])
+        result["root_path"] = root["path"] if root else ""
+        result["root_label"] = root["label"] if root else ""
+        root_path = Path(result["root_path"])
         result["create_folders"] = bool(result.get("create_folders"))
         try:
             result["created_dirs"] = json.loads(result.get("created_dirs") or "[]")
         except (TypeError, json.JSONDecodeError):
             result["created_dirs"] = []
         result["suggestions"] = [dict(s) for s in result.get("suggestions", [])]
+        folder_cache = {}
         for suggestion in result["suggestions"]:
             suggestion["selected"] = bool(suggestion.get("selected"))
+            folder = suggestion["destination_relative"].replace("\\", "/").rsplit("/", 1)[0]
+            suggestion["destination_folder"] = folder
+            if self.demo:
+                # Demo paths are synthetic; displaying an idea must not inspect
+                # a matching real filesystem path on the machine running it.
+                suggestion["destination_folder_exists"] = folder in result["created_dirs"]
+            else:
+                try:
+                    destination = root_path / folder
+                    if folder not in folder_cache:
+                        self.action_manager._validate_path_safety(root_path, destination)
+                        folder_cache[folder] = destination.is_dir()
+                    suggestion["destination_folder_exists"] = folder_cache[folder]
+                except (OSError, ValueError):
+                    suggestion["destination_folder_exists"] = False
         return result
 
     def _sort_plan(self, plan_id: str) -> dict:
@@ -412,7 +444,8 @@ class FileService:
             if root["status"] != "ready":
                 raise ValueError("Wait for a complete scan before generating Sort AI suggestions")
             files = self.store.get_sortable_files(root_id)
-            suggestions = build_suggestions(files, Path(root["path"]), create_folders=create_folders)
+            suggestions = build_suggestions(files, Path(root["path"]), create_folders=create_folders,
+                                            inspect_filesystem=not self.demo)
             now = datetime.now(timezone.utc)
             plan = {
                 "id": uuid.uuid4().hex,
@@ -429,7 +462,7 @@ class FileService:
                 suggestion["id"] = uuid.uuid4().hex
                 suggestion["created_at"] = now.isoformat()
             self.store.save_sort_plan(plan, suggestions)
-            return self._sort_plan_view({**plan, "suggestions": suggestions})
+            return self._sort_plan_view(self._sort_plan(plan["id"]))
 
     def update_sort_plan(self, plan_id: str, suggestions: list[dict]) -> dict:
         if not isinstance(suggestions, list) or len(suggestions) > 500:
@@ -450,6 +483,8 @@ class FileService:
                     raise ValueError("Unknown sort suggestion")
                 if type(patch.get("selected")) is not bool:
                     raise ValueError("selected must be a boolean")
+                if known[patch["id"]]["status"] in ("applied", "rolled_back", "undo_failed"):
+                    raise ValueError("Completed file actions cannot be edited")
                 destination = patch.get("destination_relative", known[patch["id"]]["destination_relative"])
                 if not isinstance(destination, str) or len(destination) > 240:
                     raise ValueError("Invalid destination path")
@@ -472,6 +507,29 @@ class FileService:
                 })
             return self._sort_plan_view(self._sort_plan(plan_id))
 
+    def approve_sort_idea(self, plan_id: str, *, folder=None, suggestion_id=None,
+                          confirm=False) -> dict:
+        """Apply exactly the conversational folder/file idea the user approved."""
+        if confirm is not True:
+            raise ValueError("Approving a sort idea requires confirm=true")
+        if (folder is None) == (suggestion_id is None):
+            raise ValueError("Choose a folder idea or a single file idea")
+        with self._gate:
+            plan = self._sort_plan(plan_id)
+            if plan["status"] not in ("preview", "partial"):
+                raise ValueError("This organization idea is no longer available")
+            eligible = [s for s in plan["suggestions"] if s["status"] == "suggested"]
+            selected = [s for s in eligible if
+                        (suggestion_id is not None and s["id"] == suggestion_id) or
+                        (folder is not None and s["destination_relative"].rsplit("/", 1)[0] == folder)]
+            if not selected:
+                raise ValueError("No eligible files remain in this idea")
+            chosen = {s["id"] for s in selected}
+            patches = [{"id": s["id"], "selected": s["id"] in chosen}
+                       for s in plan["suggestions"] if s["status"] in ("suggested", "blocked")]
+            self.update_sort_plan(plan_id, patches)
+            return self.apply_sort_plan(plan_id, keep_pending=True)
+
     def _prepare_sort_directories(self, plan: dict, selected: list[dict], root_path: Path) -> list[str]:
         required: set[Path] = set()
         for suggestion in selected:
@@ -486,14 +544,18 @@ class FileService:
         if missing and not plan["create_folders"]:
             raise ValueError("A destination folder is missing; regenerate with folder creation enabled")
         created = sorted((str(path.relative_to(root_path)).replace('\\', '/') for path in missing), key=lambda value: value.count('/'))
+        previous = json.loads(plan.get("created_dirs") or "[]")
+        journal_dirs = list(dict.fromkeys([*previous, *created]))
         # The plan record is durable before any directory or file mutation.
-        self.store.update_sort_plan(plan["id"], {"status": "applying", "created_dirs": json.dumps(created)})
+        self.store.update_sort_plan(plan["id"], {"status": "applying", "created_dirs": json.dumps(journal_dirs)})
         for directory in sorted(missing, key=lambda path: len(path.parts)):
             self.action_manager._validate_path_safety(root_path, directory)
             directory.mkdir(exist_ok=False)
         return created
 
     def _cleanup_sort_directories(self, plan: dict, root_path: Path) -> None:
+        if self.demo:
+            return
         try:
             directories = json.loads(plan.get("created_dirs") or "[]")
         except (TypeError, json.JSONDecodeError):
@@ -508,7 +570,7 @@ class FileService:
                 # the user; cleanup never removes user-created content.
                 continue
 
-    def apply_sort_plan(self, plan_id: str) -> dict:
+    def apply_sort_plan(self, plan_id: str, *, keep_pending=False) -> dict:
         with self._gate:
             plan = self._sort_plan(plan_id)
             if plan["status"] not in ("preview", "partial"):
@@ -519,7 +581,7 @@ class FileService:
             root = self.store.get_root(plan["root_id"])
             if not root or root["status"] != "ready":
                 raise ValueError("Root is not ready for organization")
-            selected = [s for s in plan["suggestions"] if s["selected"] and s["status"] in ("suggested", "blocked")]
+            selected = [s for s in plan["suggestions"] if s["selected"] and s["status"] == "suggested"]
             if not selected:
                 raise ValueError("Select at least one unblocked suggestion")
 
@@ -528,7 +590,10 @@ class FileService:
                 if self.demo:
                     # Demo plans exercise the same journal and selection flow,
                     # but never create directories or touch the filesystem.
-                    self.store.update_sort_plan(plan["id"], {"status": "applying", "created_dirs": "[]"})
+                    previous = json.loads(plan.get("created_dirs") or "[]")
+                    folders = [s["destination_relative"].rsplit("/", 1)[0] for s in selected]
+                    self.store.update_sort_plan(plan["id"], {
+                        "status": "applying", "created_dirs": json.dumps(list(dict.fromkeys([*previous, *folders])))})
                 else:
                     self._prepare_sort_directories(plan, selected, root_path)
             except Exception as error:
@@ -552,9 +617,12 @@ class FileService:
                     self.store.update_sort_suggestion(suggestion["id"], {"status": "failed", "error": str(error)})
                     failed.append({"suggestion_id": suggestion["id"], "status": "failed", "error": str(error)})
 
-            status = "applied" if applied and not failed else "partial" if applied else "failed"
+            remaining = self._sort_plan(plan_id)["suggestions"]
+            has_applied = any(s["status"] == "applied" for s in remaining)
+            has_pending = keep_pending and any(s["status"] == "suggested" for s in remaining)
+            status = "partial" if has_applied and (failed or has_pending) else "applied" if has_applied else "failed"
             self.store.update_sort_plan(plan_id, {"status": status, "error": None if not failed else "Some suggestions could not be applied"})
-            if not applied:
+            if not has_applied:
                 self._cleanup_sort_directories({**plan, "created_dirs": json.dumps(json.loads(self.store.get_sort_plan(plan_id)["created_dirs"]))}, root_path)
             return {"plan": self._sort_plan_view(self._sort_plan(plan_id)), "status": status,
                     "applied": applied, "failed": failed}
@@ -635,7 +703,40 @@ class FileService:
 
     def get_insights(self) -> dict:
         with self._gate:
-            return self.store.get_insights_data()
+            data = self.store.get_insights_data()
+            rows = self.store.get_review_candidate_files()
+            files = []
+            refreshed = []
+            for row in rows:
+                if is_sensitive_file(row["name"], row["extension"], row["relative_path"]):
+                    continue
+                if not self.demo and row.get("inspection_version", 0) != INSPECTION_VERSION:
+                    try:
+                        root_path = Path(row["root_path"])
+                        full_path = root_path / row["relative_path"]
+                        self.action_manager._validate_path_safety(root_path, full_path)
+                        row["excerpt"] = self._get_excerpt(
+                            full_path, row["name"], row["extension"], False, row["relative_path"])
+                        refreshed.append((row["id"], row["excerpt"]))
+                    except (OSError, ValueError):
+                        row["excerpt"] = ""
+                files.append(row)
+            if refreshed:
+                with self.store._connect() as db:
+                    db.executemany("UPDATE files SET excerpt=?, inspection_version=? WHERE id=?",
+                                   [(excerpt, INSPECTION_VERSION, file_id) for file_id, excerpt in refreshed])
+            decisions = analyze_catalog(files)
+            counts = {}
+            for decision in decisions:
+                decision["path"] = str(Path(decision["root_path"]) / decision["relative_path"])
+                action = decision["recommended_action"]
+                counts[action] = counts.get(action, 0) + 1
+            data["file_decisions"] = decisions[:100]
+            data["decision_counts"] = counts
+            data["analysis_scope"] = {"analyzed": len(decisions), "catalog_limit": 2000,
+                                      "display_limit": 100, "bounded_content_bytes": 4096}
+            data["review_candidates"] = [item for item in decisions if item["review_required"]][:30]
+            return data
 
     def get_file_excerpt(self, file_id: int) -> dict:
         file_id = self._positive_id(file_id, "file_id")
@@ -647,15 +748,129 @@ class FileService:
             excerpt = file.pop("excerpt")
             root = self.store.get_root(file["root_id"])
             if root:
-                file["path"] = str(Path(root["path"]) / file["relative_path"])
-            file["insights"] = generate_insights(file["name"], file["extension"], file["relative_path"], excerpt)
+                root_path = Path(root["path"])
+                full_path = root_path / file["relative_path"]
+                file["path"] = str(full_path)
+                if not self.demo:
+                    self.action_manager._validate_path_safety(root_path, full_path)
+                if not self.demo:
+                    # Inspect the current approved file, not a stale cached
+                    # excerpt. Excluded/sensitive types remain unread.
+                    excerpt = self._get_excerpt(full_path, file["name"], file["extension"],
+                                                bool(file["is_directory"]), file["relative_path"])
+            peers = self.store.get_sortable_files(file["root_id"])
+            row = {**file, "excerpt": excerpt, "root_label": root["label"] if root else ''}
+            peers = [peer for peer in peers if peer["id"] != file_id] + [row]
+            decisions = analyze_catalog(peers)
+            file["insights"] = next(item for item in decisions if item["file_id"] == file_id)
+            if not is_sensitive_file(file["name"], file["extension"], file["relative_path"]):
+                if file["extension"].casefold() in IMAGE_EXTENSIONS and not self.demo:
+                    file["image_preview_url"] = f"/api/files/file/{file_id}/image"
+                if file["extension"].casefold() in PDF_EXTENSIONS and not self.demo:
+                    file["pdf_preview_url"] = f"/api/files/file/{file_id}/pdf"
             return {"file": file, "excerpt": excerpt}
 
-    def _finish_scan(self, root_id: int):
+    def get_file_image(self, file_id: int) -> dict:
+        """Read one explicitly previewed raster image inside an approved root."""
+        file_id = self._positive_id(file_id, "file_id")
+        if self.demo:
+            raise ValueError("Synthetic demo files do not read images from your device")
         with self._gate:
-            self.store.update_root_status(root_id, "ready")
+            file = self.store.get_file(file_id)
+            if not file:
+                raise ValueError("File not found")
+            if (file["is_directory"] or file["extension"].casefold() not in IMAGE_EXTENSIONS
+                    or is_sensitive_file(file["name"], file["extension"], file["relative_path"])):
+                raise ValueError("This file is not eligible for an image preview")
+            root = self.store.get_root(file["root_id"])
+            if not root or root["status"] == "removed":
+                raise ValueError("Approved root is unavailable")
+            root_path = Path(root["path"])
+            full_path = root_path / file["relative_path"]
+            self.action_manager._validate_path_safety(root_path, full_path)
+            before = full_path.stat(follow_symlinks=False)
+            if not stat.S_ISREG(before.st_mode):
+                raise ValueError("Only regular image files can be previewed")
+            if before.st_size > MAX_IMAGE_BYTES:
+                raise ValueError("Image preview supports files up to 20 MiB")
+            flags = (os.O_RDONLY | getattr(os, 'O_BINARY', 0) | getattr(os, 'O_NOFOLLOW', 0)
+                     | getattr(os, 'O_NONBLOCK', 0))
+            descriptor = os.open(full_path, flags)
+            with os.fdopen(descriptor, 'rb') as stream:
+                opened = os.fstat(stream.fileno())
+                if (not stat.S_ISREG(opened.st_mode)
+                        or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+                        != (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns)):
+                    raise ValueError("Image changed while opening the preview; try again")
+                data = stream.read(MAX_IMAGE_BYTES + 1)
+                after = os.fstat(stream.fileno())
+            self.action_manager._validate_path_safety(root_path, full_path)
+            if (len(data) != opened.st_size
+                    or (after.st_size, after.st_mtime_ns) != (opened.st_size, opened.st_mtime_ns)):
+                raise ValueError("Image changed while loading the preview; try again")
+            return {"data": data, **inspect_image(data)}
+
+    def get_file_pdf(self, file_id: int) -> dict:
+        """Read one approved PDF for the in-dashboard viewer."""
+        file_id = self._positive_id(file_id, "file_id")
+        if self.demo:
+            raise ValueError("Synthetic demo files do not read PDFs from your device")
+        with self._gate:
+            file = self.store.get_file(file_id)
+            if not file:
+                raise ValueError("File not found")
+            if (file["is_directory"] or file["extension"].casefold() not in PDF_EXTENSIONS
+                    or is_sensitive_file(file["name"], file["extension"], file["relative_path"])):
+                raise ValueError("This file is not eligible for a PDF preview")
+            root = self.store.get_root(file["root_id"])
+            if not root or root["status"] == "removed":
+                raise ValueError("Approved root is unavailable")
+            root_path = Path(root["path"])
+            full_path = root_path / file["relative_path"]
+            self.action_manager._validate_path_safety(root_path, full_path)
+            before = full_path.stat(follow_symlinks=False)
+            if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_PDF_BYTES:
+                raise ValueError("PDF preview supports regular files up to 32 MiB")
+            flags = (os.O_RDONLY | getattr(os, 'O_BINARY', 0) | getattr(os, 'O_NOFOLLOW', 0)
+                     | getattr(os, 'O_NONBLOCK', 0))
+            descriptor = os.open(full_path, flags)
+            with os.fdopen(descriptor, 'rb') as stream:
+                opened = os.fstat(stream.fileno())
+                if (not stat.S_ISREG(opened.st_mode)
+                        or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+                        != (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns)):
+                    raise ValueError("PDF changed while opening the preview; try again")
+                data = stream.read(MAX_PDF_BYTES + 1)
+                after = os.fstat(stream.fileno())
+            self.action_manager._validate_path_safety(root_path, full_path)
+            if (len(data) != opened.st_size
+                    or (after.st_size, after.st_mtime_ns) != (opened.st_size, opened.st_mtime_ns)):
+                raise ValueError("PDF changed while loading the preview; try again")
+            return {"data": data, **inspect_pdf(data)}
+
+    def organize_file(self, file_id: int, *, confirm=False) -> dict:
+        """Apply the automatically chosen, server-generated destination."""
+        if confirm is not True:
+            raise ValueError("Organizing requires confirm=true")
+        file_id = self._positive_id(file_id, "file_id")
+        with self._gate:
+            file = self.store.get_file(file_id)
+            if not file:
+                raise ValueError("File not found")
+            plan = self.generate_sort_plan(file["root_id"], create_folders=True)
+            idea = next((s for s in plan["suggestions"] if s["file_id"] == file_id), None)
+            if not idea or idea["status"] != "suggested":
+                raise ValueError("No safe organization action remains for this file")
+            return self.approve_sort_idea(plan["id"], suggestion_id=idea["id"], confirm=True)
+
+    def _finish_scan(self, root_id: int, status="ready", *, error=None,
+                     file_count=None, total_size=None):
+        with self._gate:
             self._active_scans.discard(root_id)
             self._cancel_events.pop(root_id, None)
+            if file_count is not None and total_size is not None:
+                self.store.update_root_stats(root_id, file_count, total_size)
+            self.store.update_root_status(root_id, status, error)
 
     # --- File Actions ---
     def _assert_no_scan(self, root_id: int):

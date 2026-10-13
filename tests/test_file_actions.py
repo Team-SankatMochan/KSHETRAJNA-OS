@@ -48,9 +48,8 @@ class TestFileActionsStep1(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.manager.create_proposal(999, "RENAME", "doc2.txt")
             
-        # invalid action kind
-        with self.assertRaises(ValueError):
-            self.manager.create_proposal(1, "DELETE", "doc2.txt")
+        delete = self.manager.create_proposal(1, "DELETE", "doc.txt")
+        self.assertEqual(delete["destination_relative"], "doc.txt")
 
     def test_rename_validation(self):
         # successful rename
@@ -91,6 +90,18 @@ class TestFileActionsStep1(unittest.TestCase):
             self.manager.create_proposal(1, "MOVE", "/doc.txt")
         with self.assertRaisesRegex(ValueError, "Invalid destination path"):
             self.manager.create_proposal(1, "MOVE", "C:\\doc.txt")
+
+    def test_delete_is_explicitly_journaled_and_not_undoable(self):
+        source = self.root_path / "doc.txt"
+        source.write_text("remove only after review", encoding="utf-8")
+        action = self.manager.create_proposal(1, "DELETE", "doc.txt")
+        result = self.manager.apply_action(action["proposal_id"])
+        self.assertEqual(result["status"], "deleted")
+        self.assertFalse(source.exists())
+        self.assertIsNone(self.store.get_file(1))
+        self.assertEqual(self.store.get_file_action(action_id=action["id"])["status"], "deleted")
+        with self.assertRaisesRegex(ValueError, "status deleted"):
+            self.manager.undo_action(action["id"])
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,11 +5,13 @@ import os
 import time
 import json
 import http.client
+from zipfile import ZipFile
 from contextlib import closing
 from pathlib import Path
 
 from kshetrajna.file_storage import FileStore, escape_like
 from kshetrajna.file_scanner import walk, extract_excerpt
+from kshetrajna.file_insights import generate_insights
 from kshetrajna.file_service import FileService
 from kshetrajna.server import DashboardServer
 from kshetrajna.collector import Collector
@@ -81,12 +83,98 @@ class TestFileStorageAndScanner(unittest.TestCase):
         p.write_text("a" * 5000)
         self.assertEqual(len(extract_excerpt(p)), 4096)
 
+        p.write_text("€" * 5000, encoding="utf-8")
+        self.assertLessEqual(len(extract_excerpt(p).encode("utf-8")), 4096)
+
         p.write_bytes(b"hello\0world")
         self.assertEqual(extract_excerpt(p), "")
 
         p.write_bytes(b"hello\x80world")
         # Should replace invalid UTF-8 but handle it
         self.assertIn("hello", extract_excerpt(p))
+
+    def test_insights_strip_extension_case_insensitively(self):
+        insight = generate_insights("REPORT.PY", "py", "REPORT.PY", "")
+        self.assertEqual(insight["display_title"], "Report")
+        self.assertEqual(insight["suggested_category"], "Code")
+
+    def test_content_insights_explain_data_and_review_flags(self):
+        data = generate_insights(
+            "logs.csv", "csv", "logs.csv", "name,status\napi,ok\nworker,failed\n", size_bytes=42
+        )
+        self.assertEqual(data["suggested_category"], "Data")
+        self.assertIn("tabular data", data["content_summary"])
+        self.assertFalse(data["review_required"])
+
+        placeholder = generate_insights(
+            "Untitled-1.c", "c", "DSA/Untitled-1.c", "#include <stdio.h>\nint main() {}", size_bytes=32
+        )
+        self.assertTrue(placeholder["review_required"])
+        self.assertIn("placeholder", placeholder["review_reason"])
+
+        generated = generate_insights("dsa.exe", "exe", "DSA/dsa.exe", "", size_bytes=1024)
+        self.assertTrue(generated["review_required"])
+        self.assertIn("generated", generated["review_reason"])
+        self.assertIn("source file", generated["review_recommendation"])
+
+    def test_content_decision_uses_subject_and_project_evidence(self):
+        audit = generate_insights(
+            "public_gtm_tracking_audit.json", "json", "rest_clients_discovery/public_gtm_tracking_audit.json",
+            '{"placeholder":"example", "tracking_id":"GTM-ABC"}', size_bytes=12000,
+        )
+        self.assertEqual(audit["topic"], "Tracking Audit")
+        self.assertEqual(audit["suggested_folder"], "Projects/Tracking Audit")
+        self.assertEqual(audit["recommended_action"], "keep")
+        self.assertNotIn("not complete valid JSON", audit["content_summary"])
+
+        study = generate_insights(
+            "Course Plan Deep Learning (1).docx", "docx", "Downloads/Course Plan Deep Learning (1).docx",
+            "Deep learning course plan\nForward propagation activations\n", size_bytes=12000,
+        )
+        self.assertEqual(study["topic"], "Deep Learning")
+        self.assertEqual(study["suggested_folder"], "Study/Deep Learning")
+        self.assertEqual(study["recommended_action"], "organize")
+
+        video = generate_insights(
+            "WhatsApp Video 2026-10-08 at 17.02.54 (1).mp4", "mp4", "Downloads/WhatsApp Video 2026-10-08 at 17.02.54 (1).mp4", "", size_bytes=9000,
+        )
+        self.assertEqual(video["recommended_action"], "keep")
+        self.assertEqual(video["suggested_folder"], "Media/WhatsApp")
+
+        cache = generate_insights("audit_site.cpython-312.pyc", "pyc", "__pycache__/audit_site.cpython-312.pyc", "", size_bytes=1000)
+        self.assertEqual(cache["recommended_action"], "cleanup")
+
+    def test_file_insights_surface_review_candidates(self):
+        p = Path(self.temp.name) / "root"
+        p.mkdir()
+        (p / "Untitled-1.c").write_text("#include <stdio.h>\nint main() {}", encoding="utf-8")
+        (p / "dsa.exe").write_bytes(b"MZ" + b"\0" * 100)
+        (p / "metrics.csv").write_text("name,status\napi,ok\n", encoding="utf-8")
+
+        root_id = self.service.add_root(str(p), "Root")["id"]
+        self.wait_scan(root_id)
+        candidates = self.service.get_insights()["review_candidates"]
+        names = {candidate["name"] for candidate in candidates}
+        self.assertIn("Untitled-1.c", names)
+        self.assertIn("dsa.exe", names)
+        self.assertNotIn("metrics.csv", names)
+
+    def test_office_preview_extracts_bounded_document_text_on_review(self):
+        p = Path(self.temp.name) / "root"
+        p.mkdir()
+        document = p / "Course Plan Deep Learning (1).docx"
+        with ZipFile(document, "w") as archive:
+            archive.writestr(
+                "word/document.xml",
+                "<w:document><w:body><w:p><w:r><w:t>Deep learning course plan</w:t></w:r></w:p></w:body></w:document>",
+            )
+
+        root_id = self.service.add_root(str(p), "Root")["id"]
+        self.wait_scan(root_id)
+        file_id = self.service.store.get_recent_files(root_id, 10)[0]["id"]
+        preview = self.service.get_file_excerpt(file_id)
+        self.assertIn("Deep learning course plan", preview["excerpt"])
+        self.assertIn("Office document", preview["file"]["insights"]["content_summary"])
 
     def test_sensitive_files(self):
         p = Path(self.temp.name) / "root"
@@ -153,7 +241,7 @@ class TestFileStorageAndScanner(unittest.TestCase):
 
         result = self.service.search("target_100%").get("results")
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["path"], str(p / "target_100%.txt"))
+        self.assertEqual(Path(result[0]["path"]).resolve(), (p / "target_100%.txt").resolve())
         self.assertEqual(len(self.service.search("_world").get("results")), 1)
         self.assertEqual(len(self.service.search("'; DROP TABLE files; --").get("results")), 0)
 

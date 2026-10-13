@@ -117,6 +117,18 @@ class EventStore:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def process_window(self, *, now: datetime | None = None) -> list[dict]:
+        """Bounded recent process evidence; PID and creation token stay paired."""
+        cutoff = ((now or datetime.now(timezone.utc)) - timedelta(seconds=120)).isoformat()
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT s.observed_at,s.foreground_pid,p.pid,p.name,p.cpu_percent,"
+                "p.working_set_bytes,p.created_ticks FROM process_samples p "
+                "JOIN snapshots s ON s.id=p.snapshot_id "
+                "WHERE s.id IN (SELECT id FROM snapshots WHERE observed_at>=? ORDER BY id DESC LIMIT 120) "
+                "ORDER BY s.observed_at", (cutoff,)).fetchall()
+            return [dict(row) for row in rows]
+
     def prune(self, retention_days: int, *, now: datetime | None = None) -> None:
         cutoff = ((now or datetime.now(timezone.utc)) - timedelta(days=retention_days)).isoformat()
         with self._connect() as db:

@@ -1,5 +1,8 @@
 # Local deployment and packaging
 
+For the separately hosted interactive web demo, see [Vercel deployment](VERCEL.md).
+The committed root `vercel.json` serves `web-demo`; live Windows functions remain local.
+
 ## Source launch
 
 Prerequisite: Python 3.13 on Windows. The project has no third-party runtime

@@ -83,6 +83,7 @@ def main() -> int:
         pass
     finally:
         collector.stop()
+        server.chat.clear()
         server.service.restore_all()
         server.server_close()
         logger.info("Dashboard stopped")

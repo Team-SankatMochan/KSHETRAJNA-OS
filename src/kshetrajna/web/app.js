@@ -1,7 +1,14 @@
 const token = document.querySelector('meta[name="csrf-token"]').content;
 const $ = (id) => document.getElementById(id);
 const fmt = (value, digits = 1) => Number(value).toFixed(digits);
-const bytes = (value) => `${fmt(value / 1073741824)} GB`;
+const bytes = (value) => {
+  const size = Number(value);
+  if (!Number.isFinite(size) || size < 0) return 'Unknown size';
+  if (size < 1024) return `${Math.round(size)} B`;
+  const units = ['KiB', 'MiB', 'GiB', 'TiB'];
+  const unit = Math.min(Math.floor(Math.log(size) / Math.log(1024)) - 1, units.length - 1);
+  return `${fmt(size / (1024 ** (unit + 1)))} ${units[unit]}`;
+};
 let currentSettings = null;
 let currentMode = 'live';
 let refreshing = false;
@@ -119,6 +126,7 @@ function render(state) {
   const latest = state.latest;
   if (changed) document.querySelector('[name="allow_priority_changes"]').checked = settings.allow_priority_changes;
   if (changed) document.querySelector('[name="allow_maintenance"]').checked = settings.allow_maintenance;
+  if (changed) document.querySelector('[name="allow_process_control"]').checked = settings.allow_process_control;
   $('cpu').textContent = latest ? `${fmt(latest.cpu_percent)}%` : '—';
   $('cpu-bar').style.width = latest ? `${latest.cpu_percent}%` : '0%';
   const used = latest ? 100 * (1 - latest.memory_available_bytes / latest.memory_total_bytes) : 0;
@@ -163,6 +171,7 @@ $('settings-form').addEventListener('submit', async (event) => {
       track_foreground: form.elements.track_foreground.checked,
       allow_priority_changes: form.elements.allow_priority_changes.checked,
       allow_maintenance: form.elements.allow_maintenance.checked,
+      allow_process_control: form.elements.allow_process_control.checked,
       sample_interval_seconds: Number(form.elements.sample_interval_seconds.value),
       retention_days: Number(form.elements.retention_days.value),
     });

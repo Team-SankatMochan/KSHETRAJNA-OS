@@ -114,13 +114,30 @@ class FileStore:
                     reason               TEXT NOT NULL,
                     confidence           INTEGER NOT NULL,
                     selected             INTEGER NOT NULL DEFAULT 0,
-                    status               TEXT NOT NULL DEFAULT 'suggested',
-                    error                TEXT,
-                    action_id            TEXT,
-                    created_at           TEXT NOT NULL
-                );
+                     status               TEXT NOT NULL DEFAULT 'suggested',
+                     error                TEXT,
+                     action_id            TEXT,
+                     created_at           TEXT NOT NULL,
+                     content_summary     TEXT NOT NULL DEFAULT '',
+                     content_inspected   INTEGER NOT NULL DEFAULT 0,
+                     review_required     INTEGER NOT NULL DEFAULT 0,
+                     review_reason       TEXT NOT NULL DEFAULT ''
+                 );
                 CREATE INDEX IF NOT EXISTS idx_sort_suggestions_plan ON sort_suggestions(plan_id);
             """)
+            columns = {row[1] for row in db.execute("PRAGMA table_info(sort_suggestions)")}
+            migrations = {
+                "content_summary": "TEXT NOT NULL DEFAULT ''",
+                "content_inspected": "INTEGER NOT NULL DEFAULT 0",
+                "review_required": "INTEGER NOT NULL DEFAULT 0",
+                "review_reason": "TEXT NOT NULL DEFAULT ''",
+            }
+            for column, definition in migrations.items():
+                if column not in columns:
+                    db.execute(f"ALTER TABLE sort_suggestions ADD COLUMN {column} {definition}")
+            file_columns = {row[1] for row in db.execute("PRAGMA table_info(files)")}
+            if "inspection_version" not in file_columns:
+                db.execute("ALTER TABLE files ADD COLUMN inspection_version INTEGER NOT NULL DEFAULT 0")
 
     @contextmanager
     def _connect(self):
@@ -256,6 +273,16 @@ class FileStore:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def get_review_candidate_files(self, limit: int = 2000) -> list[dict]:
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT f.id, f.root_id, r.path AS root_path, r.label AS root_label, "
+                "f.relative_path, f.name, f.extension, f.size_bytes, f.modified_at, f.excerpt, f.inspection_version "
+                "FROM files f JOIN roots r ON r.id=f.root_id "
+                "WHERE f.is_directory=0 ORDER BY f.modified_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def get_sortable_files(self, root_id: int) -> list[dict]:
         with self._connect() as db:
             rows = db.execute(
@@ -279,7 +306,30 @@ class FileStore:
                 "totals": totals
             }
 
+    @staticmethod
+    def _encode_identity(values: dict) -> dict:
+        result = dict(values)
+        for key in ("expected_dev", "expected_ino"):
+            value = result.get(key)
+            if type(value) is int and not -(2**63) <= value < 2**63:
+                # NTFS identity values can exceed SQLite's signed 64-bit range.
+                # A nonnumeric prefix also prevents INTEGER affinity rounding.
+                result[key] = "bigint:" + str(value)
+        return result
+
+    @staticmethod
+    def _decode_identity(values: dict) -> dict:
+        result = dict(values)
+        for key in ("expected_dev", "expected_ino"):
+            value = result.get(key)
+            if isinstance(value, str) and value.startswith("bigint:"):
+                if len(value) > 256:
+                    raise ValueError("Invalid stored file identity")
+                result[key] = int(value[7:])
+        return result
+
     def save_file_action(self, action: dict) -> None:
+        action = self._encode_identity(action)
         with self._connect() as db:
             cols = list(action.keys())
             places = ", ".join("?" * len(cols))
@@ -289,6 +339,7 @@ class FileStore:
     def update_file_action(self, action_id: str, updates: dict) -> None:
         if not updates:
             return
+        updates = self._encode_identity(updates)
         with self._connect() as db:
             cols = list(updates.keys())
             set_clause = ", ".join(f"{c}=?" for c in cols)
@@ -303,12 +354,12 @@ class FileStore:
                 row = db.execute("SELECT * FROM file_actions WHERE proposal_id=?", (proposal_id,)).fetchone()
             else:
                 return None
-            return dict(row) if row else None
+            return self._decode_identity(dict(row)) if row else None
             
     def get_file_actions(self) -> list[dict]:
         with self._connect() as db:
             rows = db.execute("SELECT * FROM file_actions ORDER BY created_at DESC LIMIT 100").fetchall()
-            return [dict(row) for row in rows]
+            return [self._decode_identity(dict(row)) for row in rows]
 
     def save_sort_plan(self, plan: dict, suggestions: list[dict]) -> None:
         with self._connect() as db:
@@ -320,11 +371,13 @@ class FileStore:
             )
             db.executemany(
                 "INSERT INTO sort_suggestions "
-                "(id,plan_id,file_id,source_relative,destination_relative,reason,confidence,selected,status,error,action_id,created_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "(id,plan_id,file_id,source_relative,destination_relative,reason,confidence,selected,status,error,action_id,created_at,content_summary,content_inspected,review_required,review_reason) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 [(s["id"], plan["id"], s.get("file_id"), s["source_relative"], s["destination_relative"],
-                  s["reason"], s["confidence"], int(s.get("selected", False)), s.get("status", "suggested"),
-                  s.get("error"), s.get("action_id"), s["created_at"]) for s in suggestions],
+                   s["reason"], s["confidence"], int(s.get("selected", False)), s.get("status", "suggested"),
+                   s.get("error"), s.get("action_id"), s["created_at"], s.get("content_summary", ""),
+                   int(s.get("content_inspected", False)), int(s.get("review_required", False)),
+                   s.get("review_reason", "")) for s in suggestions],
             )
 
     def get_sort_plan(self, plan_id: str) -> dict | None:

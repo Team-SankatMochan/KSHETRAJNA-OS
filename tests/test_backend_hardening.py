@@ -56,6 +56,23 @@ class TestBackendHardening(unittest.TestCase):
             state = db.execute("SELECT files_seen FROM scan_state WHERE root_id=?", (root_id,)).fetchone()
         self.assertEqual(state["files_seen"], 2)
 
+    def test_windows_large_file_identity_round_trip_is_lossless(self):
+        with self.store._connect() as db:
+            db.execute("INSERT INTO roots (id,path,created_at,status) VALUES (1,?,'now','ready')", (self.temp.name,))
+            db.execute("INSERT INTO files (id,root_id,relative_path,name,indexed_at) VALUES (1,1,'doc.txt','doc.txt','now')")
+        action = {"id":"large-identity", "proposal_id":"large-proposal", "root_id":1,
+                  "file_id":1, "kind":"RENAME", "source_relative":"doc.txt",
+                  "destination_relative":"next.txt", "expected_dev":2**80,
+                  "expected_ino":2**100+123, "created_at":"now", "expires_at":"later",
+                  "status":"proposed", "mode":"demo"}
+        self.store.save_file_action(action)
+        loaded = self.store.get_file_action(action_id=action["id"])
+        self.assertEqual(loaded["expected_dev"], action["expected_dev"])
+        self.assertEqual(loaded["expected_ino"], action["expected_ino"])
+        self.store.update_file_action(action["id"], {"expected_ino":2**110+456})
+        self.assertEqual(self.store.get_file_action(action_id=action["id"])["expected_ino"], 2**110+456)
+        self.assertEqual(self.store.get_file_actions()[0]["expected_ino"], 2**110+456)
+
     def test_root_validation_rejects_files_and_symlink_roots(self):
         file_path = Path(self.temp.name) / "not-a-directory"
         file_path.write_text("file")

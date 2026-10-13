@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Explore Kshetrajna, a privacy-first Windows assistant for workflows, resources and local files. Interactive synthetic demo.">
+  <title>Kshetrajna — Your field, understood</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="demo.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="#"><span class="brand-mark">K</span><span>Kshetrajna<small>THE KNOWER OF THE FIELD</small></span></a>
+    <div class="edition">INTERACTIVE WEB DEMO</div>
+    <nav aria-label="Explore the demo">
+      <button class="nav-item active" data-prompt="Show my PC overview"><span>◈</span> Overview</button>
+      <button class="nav-item" data-prompt="Help me free RAM"><span>✧</span> Assistant</button>
+      <button class="nav-item" data-prompt="Predict my next workflow"><span>⌁</span> Workflows</button>
+      <button class="nav-item" data-prompt="Organize my Downloads"><span>▦</span> Sort AI</button>
+      <button class="nav-item" data-prompt="Review temporary files"><span>⊙</span> Maintenance</button>
+      <button class="nav-item" data-prompt="Explain privacy controls"><span>◇</span> Privacy</button>
+    </nav>
+    <div class="sidebar-bottom"><span class="status-dot"></span> Synthetic session<small>Nothing on your PC is accessed.</small><a href="https://github.com/Team-SankatMochan/KSHETRAJNA-OS/tree/experimental/sort-ai-jarvis" target="_blank" rel="noopener noreferrer">View project ↗</a></div>
+  </aside>
+  <main>
+    <header><span>YOUR WORKSPACE / OVERVIEW</span><div class="header-actions"><span class="demo-badge">SIMULATED DATA</span><button id="reset" class="quiet">Reset demo</button></div></header>
+    <section class="intro"><div><div class="eyebrow">CONTEXT BEFORE CONTROL</div><h1>Your field, understood.</h1><p>A calmer way to manage your Windows workspace.<br>Observe, understand, review — then act.</p></div><a class="local-link" href="http://127.0.0.1:8765/#chat">Open running local app ↗<small>Requires run_chat.cmd on your laptop</small></a></section>
+    <div class="notice"><span>◌</span><p><strong>Explore with sample data.</strong> This hosted demo uses scripted chat replies and simulated actions. Live telemetry, file access, PC control and an installed local AI model run in the Windows app.</p></div>
+    <section class="metrics" aria-label="Synthetic system metrics">
+      <article class="metric"><span>CPU usage <small>DEMO</small></span><div><strong>24<span>%</span></strong><svg viewBox="0 0 110 35" aria-hidden="true"><path d="M0 30 L12 24 L20 26 L30 12 L40 19 L49 10 L60 16 L70 6 L80 13 L91 12 L110 17"/></svg></div><p>Current workload · Developing</p></article>
+      <article class="metric"><span>Memory in use <small>DEMO</small></span><div><strong id="memory">10.8<span> / 16 GB</span></strong></div><progress id="memory-bar" max="16" value="10.8" aria-label="Synthetic RAM usage"></progress><p>Sample readings, never a benchmark</p></article>
+      <article class="metric"><span>Workflow signal <small>DEMO</small></span><div><strong class="word">Development</strong></div><p>Editor → browser → terminal</p></article>
+    </section>
+    <section class="workspace">
+      <div class="chat-panel">
+        <div class="panel-heading"><div><span class="assistant-symbol">✧</span><h2>Your assistant</h2></div><span class="muted">Scripted demo · No API key</span></div>
+        <div id="messages" class="messages" role="log" aria-label="Demo conversation" aria-live="polite"></div>
+        <div class="composer-wrap"><div class="shortcuts"><button data-prompt="Help me free RAM">Free RAM ↗</button><button data-prompt="Review idle apps">Review apps ↗</button><button data-prompt="Organize my Downloads">Sort files ↗</button><button data-prompt="Predict my next workflow">Predict workflow ↗</button></div><form id="chat-form"><label class="sr-only" for="prompt">Ask the demo assistant</label><input id="prompt" placeholder="Ask about memory, files or your workflow…" maxlength="2000" autocomplete="off"><button type="submit" aria-label="Send message">↑</button></form><small>Messages stay in this tab. Reset or reload clears the session.</small></div>
+      </div>
+      <aside class="insights">
+        <article class="side-card"><div class="eyebrow">EXPLAINABLE BY DESIGN</div><h2>You stay in control.</h2><ol><li><span>01</span><div><strong>Observe</strong><p>Read the workload and approved folders.</p></div></li><li><span>02</span><div><strong>Understand</strong><p>Find routines and explain suggestions.</p></div></li><li><span>03</span><div><strong>Review & approve</strong><p>See scope and risks before any change.</p></div></li><li><span>04</span><div><strong>Measure & reverse</strong><p>Log results. Undo supported actions.</p></div></li></ol></article>
+        <article class="side-card controls"><h2>Demo controls</h2><p>Enable an action type before reviewing it.</p><label><span>Memory & cleanup</span><input id="allow-maintenance" type="checkbox"></label><label><span>Close background apps</span><input id="allow-close" type="checkbox"></label><label><span>File organization</span><input id="allow-sort" type="checkbox"></label><small>These toggles affect this simulation only.</small></article>
+        <article class="side-card journal"><h2>Action journal</h2><ul id="journal"><li>No actions yet. Every approval is recorded here.</li></ul></article>
+      </aside>
+    </section>
+    <footer>LOCAL FIRST. HUMAN APPROVED.<span>Windows x64 & ARM64 design · Snapdragon device validation documented in the repository</span></footer>
+  </main>
+  <dialog id="review-dialog" aria-labelledby="review-title"><div class="eyebrow">REVIEW BEFORE APPROVAL · DEMO</div><h2 id="review-title"></h2><p id="review-detail"></p><p id="review-risk" class="risk"></p><div class="dialog-actions"><button id="cancel-review" class="quiet">Cancel</button><button id="approve-review" class="primary">Approve simulation</button></div></dialog>
+</body>
+</html>

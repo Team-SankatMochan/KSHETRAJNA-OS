@@ -33,7 +33,7 @@ python --version
 
 No pip/npm install or administrator access is needed for the source launch. If you installed several Pythons, activate an ARM64 3.13 virtual environment first so `python` selects it.
 
-The device check takes six read-only telemetry samples and runs a fixed 12,000-sample prediction benchmark. The current repository test suite contains 80 tests; the submission materials refer to the earlier 61-test suite that was reportedly run on ARM64. It does not enable continuous collection, modify process priorities or load your recorded history. It writes `reports/device-check.json`, which Git ignores. A nonzero exit means a required check failed; the JSON identifies it. Do not describe an emulated result as native.
+The device check takes six read-only telemetry samples and runs a fixed 12,000-sample prediction benchmark. The current repository test suite contains 85 tests; the submission materials refer to the earlier 61-test suite that was reportedly run on ARM64. It does not enable continuous collection, modify process priorities or load your recorded history. It writes `reports/device-check.json`, which Git ignores. A nonzero exit means a required check failed; the JSON identifies it. Do not describe an emulated result as native.
 
 The live app opens http://127.0.0.1:8765/. On a fresh computer, choose **Enable collection**. History belongs to that Windows user at `%LOCALAPPDATA%\Kshetrajna`, independently of the repo and this development computer. Keep priority trials off for initial qualification.
 

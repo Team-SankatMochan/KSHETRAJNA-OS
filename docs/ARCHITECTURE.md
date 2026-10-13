@@ -18,7 +18,7 @@ flowchart LR
   I --> B[Saved dashboard workspace board]
   
    FS[File Scanner] --> DB2[(Local SQLite files.db)]
-   DB2 --> FI[File Insights & Search]
+   DB2 --> FI[File Insights, Search & Content Review]
    FI --> SA[Sort AI rule provider]
    SA --> FP[Editable batch preview]
    FP --> FJ[File action journal]
@@ -39,7 +39,8 @@ flowchart LR
 | Rule/context + counts | Each result has inspectable evidence; no cloud or model download | App-name categories miss unknown or ambiguous workflows |
 | Separate native/simulated drivers | The demo can exercise lifecycle logic without touching Windows | A passing demo does not validate hardware-specific mutation behavior |
 | OS file lock | Prevents two CLI instances sharing one live journal | Locking scope is the selected local data directory |
-| Deterministic Sort AI provider | Gives explainable category suggestions without a model download or unverified ARM64 runtime | Metadata rules are not semantic understanding; uncertain/conflicting items require review |
+| Deterministic local content review | Uses the approved bounded text preview to describe source, data, notes, logs, drafts, placeholders and generated artifacts without a model download | It is heuristic evidence, not semantic certainty; binary/media content is metadata-only and uncertain items require review |
+| Deterministic Sort AI provider | Gives explainable category suggestions without a model download or unverified ARM64 runtime | Content profiles improve explanations, but uncertain/conflicting items still require review |
 | Loopback Jarvis bridge | Lets an assistant reuse the reviewed dashboard workflow through named JSON/HTTP commands | Loopback only; apply and undo require explicit confirmation; no arbitrary command execution |
 
 ## Observation contract
@@ -81,29 +82,42 @@ The first four actions delegate to Windows interfaces and do not report completi
 
 ## File Intelligence contract
 
-- **Opt-in Roots:** Scanning is restricted to user-approved root directories. System paths, `C:\`, and Kshetrajna's own data directory are rejected. Network (UNC) paths are not supported.
+- **Opt-in Roots:** Scanning is restricted to user-approved root directories. The dashboard shows an explicit file-access permission dialog before sending the root-add request; the API also requires `consent: true`. System paths, `C:\`, and Kshetrajna's own data directory are rejected. Network (UNC) paths are not supported.
 - **Path Security:** The browser sends an absolute path only when the user creates an approved root. After creation, all file APIs use opaque positive integer IDs. Scanner and action logic enforce both lexical and resolved containment using `Path.resolve().is_relative_to()` and reject links/reparse points along the path.
 - **Reparse Points:** Symlinks, junctions, volume mount points, and OneDrive cloud placeholders (`FILE_ATTRIBUTE_REPARSE_POINT`) are strictly ignored to prevent traversal and unintended cloud downloads. A scan that reaches the file limit is reported as `truncated`, not `ready`.
-- **Bounded Extraction:** Only listed plain-text file extensions have their contents extracted, strictly bounded to 4KB, sanitized of control characters. Known sensitive filenames (`.env`, `id_rsa`) are cataloged but their contents are never extracted.
+- **Bounded Extraction:** Only listed plain-text file extensions have their contents extracted, strictly bounded to 4KB, sanitized of control characters. The bounded preview powers deterministic content profiles and cautious review signals such as empty, placeholder, draft, stale-log, or generated-artifact warnings. Known sensitive filenames (`.env`, `id_rsa`) are cataloged but their contents are never extracted.
+- **One-click Review:** A review candidate opens a bounded source/text preview in the dashboard with line numbers for code/configuration. DOCX/PPTX/XLSX previews extract text from safe Office XML parts without executing macros or rendering media. Approved PDFs are streamed into an in-dashboard sandboxed document viewer and also receive bounded text extraction. Approved PNG/JPEG/GIF/WebP/BMP images are streamed into an in-dashboard fit/actual-size viewer after signature, dimension, size, identity, and path checks; no external app is launched. Raster pixels are displayed but are not claimed to have semantic vision recognition.
 - **Independence:** Removing File Intelligence data (`files.db`) does not interact with or compromise the System Intelligence recovery journal (`events.db`).
 
 ## Sort AI action contract
 
 Sort AI is a local deterministic provider, not a generative model. It maps
-indexed extensions and bounded metadata/excerpt tags to category folders and
-returns a reason plus an evidence score. A plan expires after five minutes and
-is stored before any directory or file mutation. The dashboard can deselect
-items and edit relative destinations; the server validates every component
-again and refuses unchanged paths, traversal, links, duplicate destinations,
-and existing files.
+indexed extensions and bounded content profiles/excerpt tags to category folders
+and returns a reason plus an evidence score. The dashboard presents grouped,
+plain-language ideas such as “I feel these files belong in one folder. Should I
+create Code at this Desktop path?” or “I feel this file belongs in the existing
+folder named Documents at this path. Should I move it?” Each idea requires a
+separate confirmation. A plan expires after five minutes and is stored before
+any directory or file mutation. The server validates every component again and
+refuses unchanged paths, traversal, links, duplicate destinations, and existing
+files.
 
-Empty category folders are created only when the plan's explicit
-`create_folders` option is enabled. Each selected move creates the existing
-file-action proposal first, then applies it with size/time/identity checks.
-Batch outcomes can be applied, partial, failed, or undone. Undo runs in
-reverse order and never overwrites a path that became occupied or changed. A
-directory created by a plan is removed only if it is still empty; cleanup is
-best effort and never recursive deletion.
+Every indexed file receives an automatic purpose/action decision with confidence
+and evidence. The decision combines path and sibling context with the bounded
+preview: it can distinguish study material, audit evidence, project source,
+tabular data, media, logs, and regenerable caches. Low-confidence, numbered,
+empty, or generated-looking files receive a review action; the system never
+deletes or moves a file because a heuristic looked suspicious.
+
+Empty category folders are created only for the conversational idea the user
+explicitly confirms. Each selected move creates the existing file-action
+proposal first, then applies it with size/time/identity checks. Outcomes can be
+applied, partial, failed, or undone; approving one idea leaves other ideas
+pending. Undo runs in reverse order and never overwrites a path that became
+occupied or changed. A directory created by a plan is removed only if it is
+still empty; cleanup is best effort and never recursive deletion. A reviewed
+file can also receive a separate, explicitly confirmed permanent-delete action;
+delete actions are journaled but are not undoable by Kshetrajna.
 
 The plan and suggestion tables are in `files.db`. Startup reconciliation links
 an action that completed just before a crash back to its plan. Deleting the

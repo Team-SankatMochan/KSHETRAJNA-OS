@@ -98,7 +98,7 @@ def recommend(latest: dict | None, model: dict) -> list[dict]:
     if memory >= 85:
         result.append({"id": "memory-review", "kind": "advice", "title": "Review memory-heavy apps",
                        "reason": f"Physical memory use is {memory:.0f}%. Save work before closing any app or browser tabs.",
-                       "effect": "Advisory only. Memory is never forcibly reclaimed."})
+                        "effect": "This advice changes nothing. Optional memory trims and app controls require separate reviews in Chat or Windows maintenance."})
     if model.get("workflows"):
         result.append({"id": "workspace", "kind": "workspace", "title": "Save a recurring workspace",
                        "reason": "These apps repeatedly appeared together in five-minute activity windows.",

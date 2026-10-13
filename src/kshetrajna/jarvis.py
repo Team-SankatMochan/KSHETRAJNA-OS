@@ -189,7 +189,7 @@ class JarvisHttpClient:
                     if existing:
                         root_id = existing["id"]
                     else:
-                        added = self._post("/api/files/roots/add", {"path": args["path"], "label": args.get("label", Path(args["path"]).name)})
+                        added = self._post("/api/files/roots/add", {"path": args["path"], "label": args.get("label", Path(args["path"]).name), "consent": True})
                         root_id = added["id"]
                         deadline = time.monotonic() + 60
                         while time.monotonic() < deadline:

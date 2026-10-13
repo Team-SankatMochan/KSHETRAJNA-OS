@@ -20,7 +20,8 @@ CATEGORY_FOLDERS = {
 }
 
 
-def build_suggestions(files: list[dict], root_path: Path, *, create_folders: bool = False) -> list[dict]:
+def build_suggestions(files: list[dict], root_path: Path, *, create_folders: bool = False,
+                      inspect_filesystem: bool = True) -> list[dict]:
     """Build bounded organization proposals from indexed files.
 
     Suggestions never overwrite a destination.  Missing destination folders
@@ -40,9 +41,15 @@ def build_suggestions(files: list[dict], root_path: Path, *, create_folders: boo
         if name.lower() in SENSITIVE_NAMES or extension in SENSITIVE_EXTENSIONS:
             continue
 
-        insight = generate_insights(name, extension, relative, str(file_row.get("excerpt", "")))
-        folder = CATEGORY_FOLDERS.get(insight["suggested_category"], "Documents")
-        destination = f"{folder}/{name}"
+        insight = generate_insights(
+            name,
+            extension,
+            relative,
+            str(file_row.get("excerpt", "")),
+            size_bytes=file_row.get("size_bytes", 0),
+        )
+        destination = insight.get("suggested_destination") or f"{insight.get('suggested_folder') or CATEGORY_FOLDERS.get(insight['suggested_category'], 'Documents')}/{name}"
+        folder = destination.rsplit('/', 1)[0] if '/' in destination else ""
         if relative.lower() == destination.lower():
             continue
 
@@ -50,8 +57,8 @@ def build_suggestions(files: list[dict], root_path: Path, *, create_folders: boo
         # Check both the catalog and the current filesystem.  A user may have
         # created a destination after the last scan, so the catalog alone is
         # not enough to prevent an overwrite.
-        conflict = destination.lower() in existing or (root_path / destination).exists()
-        folder_exists = destination_path.is_dir()
+        conflict = destination.lower() in existing or (inspect_filesystem and (root_path / destination).exists())
+        folder_exists = inspect_filesystem and destination_path.is_dir()
         blocked_reason = None
         selected = True
         if conflict:
@@ -61,10 +68,13 @@ def build_suggestions(files: list[dict], root_path: Path, *, create_folders: boo
             blocked_reason = "Destination folder does not exist; enable folder creation for this plan"
             selected = False
 
-        confidence = 92 if insight["suggested_category"] in {"Code", "Data", "Media"} else 78
-        reason = f"The .{extension} metadata rule places this file in {folder}."
+        confidence = 94 if insight.get("decision_confidence") == "high" else 88 if insight.get("decision_confidence") == "medium" else 78
+        reason = (f"Automatic decision: {insight.get('decision_summary', insight['content_summary'])}. "
+                  f"{insight['content_summary']} This supports placing it in {folder}.")
         if insight["tags"]:
             reason += " Tags: " + ", ".join(insight["tags"][:3]) + "."
+        if insight["review_required"]:
+            reason += " " + insight["review_reason"]
         if blocked_reason:
             reason += " " + blocked_reason + "."
 
@@ -79,5 +89,13 @@ def build_suggestions(files: list[dict], root_path: Path, *, create_folders: boo
             "blocked_reason": blocked_reason,
             "category": insight["suggested_category"],
             "tags": insight["tags"],
+            "content_summary": insight["content_summary"],
+            "content_inspected": insight["content_inspected"],
+            "review_required": insight["review_required"],
+            "review_reason": insight["review_reason"],
+            "recommended_action": insight["recommended_action"],
+            "decision_confidence": insight["decision_confidence"],
+            "decision_evidence": insight["decision_evidence"],
+            "suggested_folder": folder,
         })
     return suggestions

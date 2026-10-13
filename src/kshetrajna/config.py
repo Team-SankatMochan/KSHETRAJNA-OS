@@ -25,6 +25,9 @@ class Settings:
     idle_threshold_seconds: int = 60
     allow_priority_changes: bool = False
     allow_maintenance: bool = False
+    allow_process_control: bool = False
+    allow_local_ai: bool = False
+    local_ai_model: str = ""
 
     @classmethod
     def from_dict(cls, value: dict) -> "Settings":
@@ -34,9 +37,12 @@ class Settings:
         if set(value) - allowed:
             raise ValueError("Unknown setting")
         merged = {**asdict(cls()), **value}
-        for key in ("enabled", "device_consent", "track_processes", "track_foreground", "allow_priority_changes", "allow_maintenance"):
+        for key in ("enabled", "device_consent", "track_processes", "track_foreground", "allow_priority_changes", "allow_maintenance", "allow_process_control", "allow_local_ai"):
             if type(merged[key]) is not bool:
                 raise ValueError(f"{key} must be a boolean")
+        model = merged["local_ai_model"]
+        if not isinstance(model, str) or len(model) > 150 or any(ord(c) < 32 for c in model):
+            raise ValueError("Invalid local model name")
         bounds = {
             "sample_interval_seconds": (2, 60),
             "retention_days": (1, 30),

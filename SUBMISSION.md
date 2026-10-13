@@ -31,7 +31,7 @@ The contribution is the complete interaction: evidence → recommendation → ex
 
 **Does it improve performance?** No causal benchmark is claimed. The prototype records observations around a trial. Controlled A/B experiments and a latency metric are needed before making a performance claim.
 
-**What can it change?** With live opt-in and approval, it can temporarily lower one eligible background process from Normal to Below normal priority. With a separate maintenance opt-in, it can launch selected Windows cleanup tools, review/delete bounded old `%TEMP%` candidates, or request a one-process working-set trim; those actions may be irreversible and are not presented as performance guarantees. The default mode observes only. Workspace boards change the dashboard UI. Sort AI file moves are deterministic proposals that require per-batch review and are conflict-checked before mutation.
+**What can it change?** With live opt-in and approval, it can temporarily lower one eligible background process from Normal to Below normal priority. With a separate maintenance opt-in, it can launch selected Windows cleanup tools, review/delete bounded old `%TEMP%` candidates, or request a one-process working-set trim; those actions may be irreversible and are not presented as performance guarantees. The default mode observes only. Workspace boards change the dashboard UI. File Intelligence requires explicit folder-access consent before scanning. Sort AI explains deterministic folder/file ideas in plain language and requires separate confirmation before creating a folder or moving files; conflicts are blocked before mutation.
 
 **How does rollback work?** The original state is journaled before mutation, then restored on undo/expiry, pause, or graceful shutdown. Startup retries pending records after a crash. It never overwrites a priority class changed by another actor. Descendants are outside the selected-process rollback scope.
 
@@ -43,7 +43,7 @@ The contribution is the complete interaction: evidence → recommendation → ex
 - README.md: quickstart, implemented phases, and limitations.
 - docs/ARCHITECTURE.md: technology choices and contracts.
 - PHASE1.md: the earlier observe-only foundation design, retained as historical context.
-- tests/: executable regression tests (80 total: 78 passed and 2 platform-specific skips in the Linux integration run).
+- tests/: executable regression tests (85 total: 83 passed and 2 platform-specific skips in the current Linux integration run).
 - .github/workflows/tests.yml: CI configuration for Windows and Linux unit/demo tests, with a conditional native ARM64 job when repository visibility and runner availability permit it.
 
 The current integration is an experimental Git snapshot for later device

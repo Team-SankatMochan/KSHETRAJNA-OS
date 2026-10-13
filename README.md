@@ -10,15 +10,43 @@ assets are retained once under [`submission/`](submission/README.md).
 
 ## Run the submission now
 
+### Host the interactive demo on Vercel
+
+Import this repository from **experimental/sort-ai-jarvis**, choose **Other**,
+and leave Root Directory at the repository root. The committed `vercel.json`
+serves **web-demo** without an install or build step. No API keys are needed.
+See [Vercel setup](docs/VERCEL.md) for the exact settings.
+
+The hosted version uses synthetic data, scripted replies and simulated actions.
+Real Windows telemetry, file operations, RAM/process controls and installed local
+AI run on the laptop through the launchers below.
+
+### Local chat, without an API key
+
+Run **run_chat.cmd** to start the installed Ollama runtime and the application.
+Open **Chat**, select an installed local model, and choose **Enable local AI**.
+This computer already has `llama3.1:8b`; no model was downloaded for this integration.
+Chat supports normal conversation, current system inspection, memory review,
+temporary-file cleanup, Store cache tools, and reviewed app closure. Enable
+the corresponding action controls in Privacy, then approve each review card.
+Force termination targets one eligible background PID and requires typing its
+exact name. Low CPU never triggers automatic termination.
+
+Model replies stream locally. Stop, new chat, model selection and model unload
+are available. Conversations remain in application memory, not a chat database.
+The provider rejects cloud models. See [local assistant setup and boundaries](docs/LOCAL_ASSISTANT.md).
+This is a local-model assistant, not the OpenAI ChatGPT service. The optional
+Ollama runtime/model is separate from the dependency-free Python core.
+
 Install **Python 3.13**, open this folder, and double-click **run_demo.cmd**. The browser opens at [127.0.0.1:8766](http://127.0.0.1:8766/). No packages, API keys, cloud services, or build step are required.
 
 The demo uses clearly labeled synthetic data in a temporary database. Its approval and rollback actions are simulated and cannot modify Windows. Closing the process removes its temporary session. Download the session report before closing if you want to keep it.
 
 For actual Windows observations, run **run.cmd**, then choose **Enable collection**. Live collection and priority changes each default to off. Use Ctrl+C in the terminal for a graceful stop. Both launchers accept **--no-browser** and **--port 8767**.
 
-The first live enable action asks for local telemetry consent once and persists it in `%LOCALAPPDATA%\Kshetrajna\config.json`; later launches do not ask again. Conventional Desktop, Downloads, Documents, and OneDrive paths are fetched locally without enumerating their contents. Selecting **Approve and scan** is still required for each folder.
+The first live enable action asks for local telemetry consent once and persists it in `%LOCALAPPDATA%\Kshetrajna\config.json`; later launches do not ask again. Conventional Desktop, Downloads, Documents, and OneDrive paths are discovered locally without enumerating their contents. Selecting **Approve and scan** opens an explicit file-access permission dialog for each folder; scanning never moves or deletes files. Sort AI then asks conversational, folder-by-folder questions before creating a folder or moving any file.
 
-Read [SUBMISSION.md](SUBMISSION.md) for a 90-second demo script and copy-ready project description. [Architecture and decisions](docs/ARCHITECTURE.md), the [feature matrix](docs/FEATURE_MATRIX.md), [privacy inventory](docs/PRIVACY.md), [deployment guide](docs/DEPLOYMENT.md), and [demo script](docs/DEMO.md) explain the verified implementation. The original [project vision](docs/VISION.md) is preserved.
+Read [SUBMISSION.md](SUBMISSION.md) for a 90-second demo script and copy-ready project description. [Architecture and decisions](docs/ARCHITECTURE.md), the [UML model](docs/UML.md), [feature matrix](docs/FEATURE_MATRIX.md), [privacy inventory](docs/PRIVACY.md), [deployment guide](docs/DEPLOYMENT.md), and [demo script](docs/DEMO.md) explain the verified implementation. The original [project vision](docs/VISION.md) is preserved.
 
 ## What the prototype delivers
 
@@ -30,17 +58,17 @@ Read [SUBMISSION.md](SUBMISSION.md) for a 90-second demo script and copy-ready p
 | 4 · Adapt with consent | Review/approve/dismiss, optional 60-second live Normal → Below normal priority trial, saved workspace boards within the dashboard. |
 | 5 · Evaluate and reverse | Durable decision journal, manual and timed undo, pause/shutdown restoration, startup recovery, observed before/after deltas, feedback that suppresses unwanted suggestions. |
 | 6 · Demonstrate and verify | Four synthetic scenarios, JSON report download, launch scripts, regression tests, Windows/Linux CI definition, submission guide. |
-| 7 · File Intelligence | Local file indexing, bounded excerpts, keyword search, metadata insights, contextual file suggestions, separate `files.db`, and a reviewed Sort AI panel. Deterministic category suggestions support editable batch previews, explicit empty-folder creation, conflict-aware partial completion, durable per-file actions, and reverse-order undo. |
+| 7 · File Intelligence | Local file indexing, bounded excerpts, one-click previews for text/code, Office files, PDFs, and images, automatic purpose/action decisions, keyword search, content-aware review signals, metadata insights, contextual file suggestions, separate `files.db`, and a reviewed Sort AI panel. Explicit folder-access consent precedes scanning. Conversational category ideas combine path, related-file, filename, and content evidence to organize study material, project evidence, code, data, media, logs, and generated caches without silently moving or deleting files. |
 | 8 · Windows tools | Reviewed Storage settings, Disk Cleanup, Store cache, temporary-folder inspection, bounded temporary-file preview/cleanup, and one-process working-set trim. Each operation has its own scope and undo limitation. |
 
 ## Important boundaries
 
-- Context detection uses explicit app-name rules. Personal patterns use counts from recent retained observations. There is no trained LLM, NPU inference, or claim to understand document content.
+- Workflow context and Sort AI use local rules and retained observations. Optional conversation uses an installed Ollama LLM with a bounded review-only tool interface. Semantic file embeddings and NPU inference are not implemented.
 - Workspace adaptation changes this dashboard's app board. It does not reposition desktop windows or modify taskbars.
 - Live CPU trials are experimental and individually approved. They affect a single allowlisted, background process at Normal priority in the current session. PID and process creation time are checked before acting.
 - The selected process is restored to Normal on undo or expiry (checked approximately every second), when collection is paused, when live trials are disabled, on graceful shutdown, or during startup recovery. Failed restoration remains visible and keeps its recovery record.
 - If the app is forcibly killed, a priority change can persist until restart recovery or until the target exits. Newly spawned children can inherit the selected process's priority; they are outside this prototype's rollback scope.
-- No application is killed, no power plan is changed, and no elevated or real-time priority is used. An explicitly enabled Windows maintenance action can request `EmptyWorkingSet` for one eligible background process or delete only reviewed, old files in the fixed `%TEMP%` location; working-set trim has no exact undo and temporary-file deletion is permanent.
+- No application is terminated automatically, no power plan is changed, and no elevated or real-time priority is used. Separately enabled app controls can request graceful closure or individually confirmed force termination for one verified, allowlisted background PID. Closing/termination can lose unsaved work and has no undo. An explicitly enabled Windows maintenance action can request `EmptyWorkingSet` for one eligible background process or delete reviewed, old files in the fixed `%TEMP%` location; working-set trim has no exact undo and temporary-file deletion is permanent.
 - Before/after system metrics are observations, not proof that a trial caused an improvement. Synthetic demo metrics are never benchmarks.
 
 ## Privacy and storage
@@ -101,7 +129,7 @@ $env:PYTHONPATH = 'src'
 python -m unittest discover -s tests -v
 ~~~
 
-Tests cover consent, schema migration, retention/deletion, model evidence, stale proposals, one active trial, journal-before-action ordering, expiry, restart recovery, failed restoration, feedback, workspaces, file scanning/actions, Sort AI batch preview/apply/undo, catalog deletion protection, temporary-file scope, automatic path discovery, persisted consent, Jarvis bridge validation, malformed file API inputs, and the HTTP workflow. Native priority calls are isolated behind a driver and tested with controlled doubles; file and maintenance mutations use temporary fixtures; the demo never changes user processes. The local suite contains 80 tests: 78 passed and 2 platform-specific checks were skipped on CPython 3.14.4/Linux x86_64. See [the validation record](docs/VALIDATION.md).
+Tests cover consent, schema migration, retention/deletion, model evidence, stale proposals, one active trial, journal-before-action ordering, expiry, restart recovery, failed restoration, feedback, workspaces, file scanning/actions, bounded UTF-8 extraction, content-aware review signals, Sort AI batch preview/apply/undo, conversational folder approval, catalog deletion protection, temporary-file scope, automatic path discovery, persisted consent, Jarvis bridge validation, malformed file API inputs, and the HTTP workflow. Native priority calls are isolated behind a driver and tested with controlled doubles; file and maintenance mutations use temporary fixtures; the demo never changes user processes. See [the validation record](docs/VALIDATION.md) for the current test count.
 
 ## Source map
 

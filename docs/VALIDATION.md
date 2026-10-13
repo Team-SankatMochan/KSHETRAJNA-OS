@@ -1,5 +1,40 @@
 # Validation record
 
+## Update: 14 October 2026 — Vercel demo
+
+- Added an isolated static `web-demo` and root Vercel configuration. No cloud
+  model, Windows control endpoint or personal telemetry is part of that site.
+- Node syntax validation and repository whitespace checks passed.
+- Browser checks passed for memory action review/approval and the updated
+  synthetic reading/journal, and file sorting followed by reviewed undo.
+- The desktop layout was visually inspected. Hosted data and replies are
+  explicitly labeled synthetic/scripted; no real PC operation was performed.
+- These checks previewed the static site locally. A real Vercel deployment
+  has not been made. See [deployment settings](VERCEL.md).
+
+## Update: 13 October 2026 — local assistant
+
+- Windows x64, CPython 3.13.3: **119 tests passed** in the final full-suite run
+  (38.928 seconds). The final chat-focused checks also passed after guardrail
+  and interface refinements. Fixtures and controlled drivers isolate mutations.
+- New coverage includes model consent/history/cancellation, review-only model
+  tool calls, invalid executable-tool rejection, action outcome context, app
+  controls, typed force confirmation, expiry and PID/foreground revalidation.
+- A real reply from the already-installed `llama3.1:8b` model was observed in the
+  browser. No API key or new model download was used. Test PC readings/actions
+  remained synthetic during browser checks.
+- Windows user-SID binding was checked read-only. No personal application was
+  closed, force-terminated, or memory-trimmed during validation.
+- The Windows file-identity SQLite overflow now has a lossless large-integer
+  representation and regression test. The path test compares resolved Windows
+  paths rather than raw short/long path spelling. Remote CI has not been rerun
+  on these local changes.
+- JavaScript syntax checks and launcher help smoke passed. The provider's
+  external runtime and this integration still need Snapdragon device checks;
+  native ARM64 inference or NPU acceleration is not claimed.
+
+The following 6 October record describes the earlier integration snapshot.
+
 Date: 6 October 2026. This records checks actually performed in the current development checkout.
 
 ## Environment
@@ -12,7 +47,7 @@ Date: 6 October 2026. This records checks actually performed in the current deve
 
 | Check | Result |
 |---|---|
-| Python unittest suite | 80 tests total: 78 passed, 2 platform-specific skips on CPython 3.14.4/Linux x86_64; includes pattern/prediction, privacy, file-action hardening, Sort AI batch lifecycle, temporary maintenance scope, automatic path discovery, persisted consent, Jarvis bridge validation, malformed file API, and device diagnostic checks |
+| Python unittest suite | 101 tests total: 99 passed, 2 platform-specific skips in the current Linux verification run; includes pattern/prediction, privacy, file-action hardening, scan completion ordering, explicit file-root consent, conversational folder approval, bounded UTF-8, Office/PDF/image extraction, PDF signature/page/text/identity/path checks, automatic purpose/action decisions, project/subject evidence, Sort AI lifecycle, temporary maintenance scope, automatic path discovery, persisted consent, Jarvis bridge validation, malformed file API, and device diagnostic checks |
 | Jarvis bridge | Local in-process dispatch, loopback token reuse, JSON-lines validation, explicit apply/undo confirmation, and synthetic command smoke passed |
 | JavaScript syntax | All four dashboard scripts passed Node syntax checks |
 | HTTP integration | Assets, security headers, Host/Origin/token validation, request validation, approval, undo, report export, and Sort AI plan preview passed |
@@ -24,7 +59,7 @@ Date: 6 October 2026. This records checks actually performed in the current deve
 | Browser interaction | Simulated approval, saved workspace activation, manual rollback and outcome display are covered by existing browser-path code; Sort AI DOM syntax was checked, while a full browser automation run was not available in this runner |
 | Browser console | Not checked in this session; dashboard scripts passed syntax checks |
 | Workflow prediction | Sequence disambiguation, idle/gap boundaries, habit drift, ambiguity abstention and chronological replay verified with synthetic histories |
-| File-action hardening | Root file/symlink rejection, scan-limit truncation, post-mutation race handling, malformed numeric API IDs, catalog-deletion protection, and Sort AI conflict/undo fixtures passed focused regression tests |
+| File-action hardening | Root file/symlink rejection, scan-limit truncation, post-mutation race handling, malformed numeric API IDs, catalog-deletion protection, reviewed permanent-delete journaling, Sort AI conflict/undo fixtures, automatic purpose/action decisions, content-aware review signals, and byte-bounded UTF-8/Office/PDF/image extraction passed focused regression tests |
 | Repository whitespace | `git diff --check` passed for the experimental snapshot |
 
 The journal displays before/after observations with an explicit noncausal
@@ -51,7 +86,7 @@ Snapdragon computer. See [device setup and interpretation](SNAPDRAGON.md).
 - CI configuration is included, but a remote CI run has not been observed.
 - No controlled benchmark, battery measurement, production security audit or installer qualification has been completed.
 - Workspace adaptation currently changes the dashboard board. It does not arrange desktop windows or launch applications.
-- Sort AI is deterministic metadata organization rather than semantic model inference; no model download, NPU runtime, or accelerated provider is included.
+- Sort AI uses deterministic path, sibling, metadata, and bounded local text heuristics for purpose/action explanations and cautious review prompts; it is not semantic model inference and cannot guarantee truth from a 4 KiB preview. No model download, NPU runtime, or accelerated provider is included.
 - No signed installer or packaged x64/ARM64 artifact has been qualified.
 - The runner does not have `pip`, so a wheel build could not be executed here; source launch remains the verified deployment path.
 - Recovery restores the selected process. Descendant inheritance and recovery while the app remains crashed need further engineering.
