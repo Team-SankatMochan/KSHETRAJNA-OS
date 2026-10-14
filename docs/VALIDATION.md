@@ -16,8 +16,14 @@
   matches while retaining four ambiguous files, and restored the three moves.
   The final in-app approval/history controls were exercised; two keep decisions
   reduced the advice queue from four to two. No personal files were sorted.
-- Browser syntax and repository whitespace checks passed. New native package
-  qualification is required before publishing 0.4.1 bundles.
+- Browser syntax and repository whitespace checks passed.
+- Commit `093d60d` passed all 139 source tests on Windows x64, native Windows
+  ARM64 and Linux in [run 38524710465](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/actions/runs/38524710465).
+  Both native packages passed their actual bundled-interpreter/app checks in
+  [run 38524710443](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/actions/runs/38524710443).
+- The exact native CI artifacts were downloaded. A separate local audit could
+  not start because automatic permission review timed out twice. Publication
+  and installation of the 0.4.1 archives remain pending that finishing step.
 
 ## Update: 14 October 2026 — self-contained distribution
 

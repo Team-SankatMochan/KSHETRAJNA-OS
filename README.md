@@ -8,6 +8,9 @@ A local Windows workload and file assistant that observes app activity, indexes 
 separate advice queue and remembered keep decisions. Downloads discovery uses
 Windows' actual folder location. See [Sort AI setup and behavior](docs/SORT_AI.md).
 
+The source checkout includes 0.4.1. The download links below still point to
+0.4.0 while the new release's publication and installation are being finished.
+
 **Public Windows beta:** Source tests and packaged-app checks passed on native
 Windows x64 and ARM64. System modifications remain experimental and individually
 approved. Historical pitch assets are retained under [`submission/`](submission/README.md).
