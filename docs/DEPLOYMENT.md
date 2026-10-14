@@ -5,7 +5,7 @@ The committed root `vercel.json` serves `web-demo`; live Windows functions remai
 
 ## Self-contained Windows app
 
-[Download the Windows beta](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/tag/v0.4.0).
+[Download the Windows beta](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/tag/v0.4.1).
 Choose x64 for Intel/AMD or ARM64 for Snapdragon, extract, and open `Launch.cmd`.
 Python is included. `Install.cmd` offers a verified per-user copy and optional
 desktop shortcut. Use Quit Kshetrajna in Privacy for graceful shutdown.
@@ -79,9 +79,9 @@ checkout.
 
 ## Packaging status
 
-Public version 0.4.0 contains self-contained x64 and ARM64 archives with the
+Public version 0.4.1 contains self-contained x64 and ARM64 archives with the
 official hash-pinned CPython 3.13.16 runtime. Both exact archives passed native
-packaged-app checks, and the 129-test source suite passed Windows x64, Windows
+packaged-app checks, and the 139-test source suite passed Windows x64, Windows
 ARM64 and Linux. Installation is scoped to the current user's profile and keeps
 history separately. The archives and setup scripts are unsigned; no signed
 MSI/EXE installer or automatic-update service is included.

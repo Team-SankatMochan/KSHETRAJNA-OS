@@ -8,9 +8,6 @@ A local Windows workload and file assistant that observes app activity, indexes 
 separate advice queue and remembered keep decisions. Downloads discovery uses
 Windows' actual folder location. See [Sort AI setup and behavior](docs/SORT_AI.md).
 
-The source checkout includes 0.4.1. The download links below still point to
-0.4.0 while the new release's publication and installation are being finished.
-
 **Public Windows beta:** Source tests and packaged-app checks passed on native
 Windows x64 and ARM64. System modifications remain experimental and individually
 approved. Historical pitch assets are retained under [`submission/`](submission/README.md).
@@ -20,8 +17,8 @@ approved. Historical pitch assets are retained under [`submission/`](submission/
 ### Self-contained Windows bundles
 
 Version 0.4 adds native x64 and ARM64 packages containing Python and the app.
-Download [Intel/AMD x64](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.0/Kshetrajna-Windows-x64.zip)
-or [Snapdragon/ARM64](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.0/Kshetrajna-Windows-arm64.zip).
+Download [Intel/AMD x64](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.1/Kshetrajna-Windows-x64.zip)
+or [Snapdragon/ARM64](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.1/Kshetrajna-Windows-arm64.zip).
 Extract a package and open **Launch.cmd**, or use **Install.cmd** for a verified
 per-user copy and optional desktop shortcut. Use **Quit Kshetrajna** in Privacy
 to stop the background application. See [packaging and verification](docs/WINDOWS_BUNDLES.md).
@@ -73,7 +70,7 @@ The demo uses clearly labeled synthetic data in a temporary database. Its approv
 
 For actual Windows observations, run **run.cmd**, then choose **Enable collection**. Live collection and priority changes each default to off. Use Ctrl+C in the terminal for a graceful stop. Both launchers accept **--no-browser** and **--port 8767**.
 
-The first live enable action asks for local telemetry consent once and persists it in `%LOCALAPPDATA%\Kshetrajna\config.json`; later launches do not ask again. Conventional Desktop, Downloads, Documents, and OneDrive paths are discovered locally without enumerating their contents. Selecting **Approve and scan** opens an explicit file-access permission dialog for each folder; scanning never moves or deletes files. Sort AI then asks conversational, folder-by-folder questions before creating a folder or moving any file.
+The first live enable action asks for local telemetry consent once and persists it in `%LOCALAPPDATA%\Kshetrajna\config.json`; later launches do not ask again. Conventional Desktop, Downloads, Documents, and OneDrive paths are discovered locally without enumerating their contents. Selecting **Approve and scan** opens an explicit file-access permission dialog for each folder; scanning never moves or deletes files. Sort AI previews destinations and sorts clear matches after one batch approval; ambiguous files enter a separate advice queue. Keep-here decisions are remembered, and eligible batches can be undone.
 
 Read [SUBMISSION.md](SUBMISSION.md) for a 90-second demo script and copy-ready project description. [Architecture and decisions](docs/ARCHITECTURE.md), the [UML model](docs/UML.md), [feature matrix](docs/FEATURE_MATRIX.md), [privacy inventory](docs/PRIVACY.md), [deployment guide](docs/DEPLOYMENT.md), and [demo script](docs/DEMO.md) explain the verified implementation. The original [project vision](docs/VISION.md) is preserved.
 
@@ -112,7 +109,7 @@ SQLite is not application-encrypted. The boundary is the current Windows user pr
 
 **Python 3.13 + standard library**, **ctypes/Win32**, **SQLite**, and **HTML/CSS/JavaScript/SVG**. There are zero runtime package dependencies. This keeps the project offline-capable and avoids architecture-specific third-party wheels. A small local HTTP server hosts the dashboard; it is not designed for public deployment.
 
-On Snapdragon X, use the ARM64 bundle or native ARM64 Python for source launch. The Windows API bindings use pointer-sized handles and counters. The 129-test source suite and packaged interpreter/dashboard passed native Windows ARM64 CI, including read-only diagnostics. The supplied submission brief separately reports an earlier user-confirmed 61-test Snapdragon run. Generic ARM64 runner compatibility is not a Snapdragon model-speed or battery benchmark. Follow [the device checks](docs/SNAPDRAGON.md) for your laptop.
+On Snapdragon X, use the ARM64 bundle or native ARM64 Python for source launch. The Windows API bindings use pointer-sized handles and counters. The 139-test source suite and packaged interpreter/dashboard passed native Windows ARM64 CI, including read-only diagnostics. The supplied submission brief separately reports an earlier user-confirmed 61-test Snapdragon run. Generic ARM64 runner compatibility is not a Snapdragon model-speed or battery benchmark. Follow [the device checks](docs/SNAPDRAGON.md) for your laptop.
 
 ## Tests
 

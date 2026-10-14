@@ -5,8 +5,8 @@ local dashboard, with observations and reviewed actions on their own device.
 
 ## First launch — Python included
 
-1. Download [Intel/AMD x64](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.0/Kshetrajna-Windows-x64.zip)
-   or [Snapdragon/ARM64](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.0/Kshetrajna-Windows-arm64.zip).
+1. Download [Intel/AMD x64](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.1/Kshetrajna-Windows-x64.zip)
+   or [Snapdragon/ARM64](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.1/Kshetrajna-Windows-arm64.zip).
    Choose the architecture shown in Windows Settings → System → About.
 2. In File Explorer choose **Extract All**, then open the **Kshetrajna** folder.
    Running scripts directly inside the archive will not work.
@@ -26,7 +26,7 @@ local dashboard, with observations and reviewed actions on their own device.
    leaves the app running.
 
 These are unsigned beta archives with setup scripts, not signed MSI/EXE
-installers. Download from the [project release](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/tag/v0.4.0);
+installers. Download from the [project release](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/tag/v0.4.1);
 matching checksum files are provided. See [packaging details](WINDOWS_BUNDLES.md).
 
 ## Optional AI
@@ -85,7 +85,7 @@ The separate Python ARM64 installer is marked experimental by upstream.
 
 ## Snapdragon qualification
 
-The 129-test source suite and exact packaged-app checks passed on native
+The 139-test source suite and exact packaged-app checks passed on native
 Windows x64 and ARM64 CI. This establishes compatibility of those tested
 packages, not a Snapdragon battery, NPU or model-speed benchmark. For device
 measurements use [the Snapdragon guide](SNAPDRAGON.md). In a bundle, run

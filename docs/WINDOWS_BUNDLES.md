@@ -10,9 +10,9 @@ not signed MSI/EXE installers. Python's upstream runtime license is retained.
 General AI conversation additionally requires a separately installed compatible
 Ollama runtime and a local model; neither is downloaded by the application.
 
-The [v0.4.0 beta release](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/tag/v0.4.0)
-contains the exact archives tested in [native x64/ARM64 CI](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/actions/runs/38474805694).
-Both jobs passed, including the 129-test source suite and packaged-app checks.
+The [v0.4.1 beta release](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/tag/v0.4.1)
+contains the exact archives tested in [native x64/ARM64 CI](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/actions/runs/38524710443).
+Both jobs passed, including the 139-test source suite and packaged-app checks.
 
 ## User experience
 

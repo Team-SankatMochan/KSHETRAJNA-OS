@@ -21,9 +21,15 @@
   ARM64 and Linux in [run 38524710465](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/actions/runs/38524710465).
   Both native packages passed their actual bundled-interpreter/app checks in
   [run 38524710443](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/actions/runs/38524710443).
-- The exact native CI artifacts were downloaded. A separate local audit could
-  not start because automatic permission review timed out twice. Publication
-  and installation of the 0.4.1 archives remain pending that finishing step.
+- The exact native CI artifacts were published in the
+  [v0.4.1 beta release](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/tag/v0.4.1),
+  with x64/ARM64 archives and their checksum files. The x64 archive was
+  installed under the current user's Programs directory with a new
+  version-specific Desktop shortcut; existing versions and history remain.
+- A separate optional local archive audit did not start because automatic
+  permission review timed out twice. The user requested publication and
+  installation without further testing. No additional smoke tests or
+  personal-file operations were performed after that instruction.
 
 ## Update: 14 October 2026 — self-contained distribution
 
