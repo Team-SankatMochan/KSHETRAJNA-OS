@@ -42,6 +42,9 @@ SENSITIVE_EXTENSIONS = frozenset({'pem', 'key', 'p12', 'pfx', 'jks', 'keystore'}
 
 SENSITIVE_DIRS = frozenset({'.git', '.ssh', '.aws'})
 GENERATED_DIRS = frozenset({'node_modules', '.venv', 'venv', '__pycache__', '.cache', '.next'})
+SYSTEM_DIRS = frozenset({'windows', 'program files', 'program files (x86)', 'programdata',
+                         'appdata', '$recycle.bin', 'system volume information', '.codex', '.agents',
+                         '.config', '.local', '.npm', '.gradle', '.android', '.dart_tool', '.pub-cache'})
 
 
 def is_sensitive_file(name: str, extension: str, relative: str) -> bool:
@@ -131,7 +134,7 @@ def extract_office_excerpt(file_path: Path, max_bytes: int = MAX_EXCERPT_BYTES) 
     except (OSError, zipfile.BadZipFile, RuntimeError, ValueError):
         return ""
 
-def walk(root: Path, is_cancelled: Callable[[], bool] = lambda: False, notes: dict | None = None) -> Generator[Tuple[str, os.DirEntry, os.stat_result], None, None]:
+def walk(root: Path, is_cancelled: Callable[[], bool] = lambda: False, notes: dict | None = None, *, max_files=None) -> Generator[Tuple[str, os.DirEntry, os.stat_result], None, None]:
     """Iterative directory walk using os.scandir."""
     try:
         resolved_root = root.resolve(strict=True)
@@ -186,13 +189,13 @@ def walk(root: Path, is_cancelled: Callable[[], bool] = lambda: False, notes: di
                 continue
 
             if entry.is_dir(follow_symlinks=False):
-                if entry.name.casefold() in SENSITIVE_DIRS | GENERATED_DIRS:
+                if entry.name.casefold() in SENSITIVE_DIRS | GENERATED_DIRS | SYSTEM_DIRS:
                     skipped('excluded_folders')
                     continue
                 stack.append((Path(entry.path), relative, depth + 1))
             elif stat.S_ISREG(info.st_mode):
                 seen_count += 1
-                if seen_count > MAX_FILES:
+                if seen_count > (MAX_FILES if max_files is None else max_files):
                     # Do not silently turn a partial index into a successful scan.
                     raise ScanTruncated
                 yield (relative, entry, info)

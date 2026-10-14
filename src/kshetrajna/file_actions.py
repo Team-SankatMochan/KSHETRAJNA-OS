@@ -65,7 +65,8 @@ class FileActionManager:
         file_id: int,
         kind: str,
         destination_relative: str,
-        mode: str = "live"
+        mode: str = "live",
+        destination_root_id: int | None = None,
     ) -> dict:
         """
         Create a file mutation proposal.
@@ -79,6 +80,14 @@ class FileActionManager:
                 raise ValueError("File not found")
             if file_row["is_directory"]:
                 raise ValueError("Directories cannot be deleted or moved by a file action")
+        target_root_id = file_row['root_id'] if destination_root_id is None else destination_root_id
+        if type(target_root_id) is not int or target_root_id <= 0:
+            raise ValueError('Invalid destination root')
+        if kind != 'MOVE' and target_root_id != file_row['root_id']:
+            raise ValueError('Only moves can use a different approved root')
+        target_root = self.store.get_root(target_root_id)
+        if not target_root or target_root['status'] not in ('ready', 'pending', 'error', 'truncated'):
+            raise ValueError('Destination root is missing or being scanned')
                 
         if not destination_relative or destination_relative.strip() == "":
             raise ValueError("Destination cannot be empty")
@@ -93,7 +102,7 @@ class FileActionManager:
             dest_rel = destination_relative
             # Ensure parent exists
             if mode != "demo":
-                parent = (Path(file_row["root_path"]) / dest_rel).parent
+                parent = (Path(target_root['path']) / dest_rel).parent
                 if not parent.exists() or not parent.is_dir():
                     raise ValueError("Destination directory does not exist")
         else:
@@ -131,6 +140,7 @@ class FileActionManager:
             "id": action_id,
             "proposal_id": proposal_id,
             "root_id": file_row["root_id"],
+            "destination_root_id": target_root_id,
             "file_id": file_id,
             "kind": kind,
             "source_relative": file_row["relative_path"],
@@ -150,6 +160,20 @@ class FileActionManager:
         
         self.store.save_file_action(action)
         return action
+
+    def _destination_root(self, action: dict) -> Path:
+        root = self.store.get_root(action.get('destination_root_id') or action['root_id'])
+        if not root or root['status'] not in ('ready', 'pending', 'error', 'truncated'):
+            raise ValueError('Destination root is missing or being scanned')
+        return Path(root['path'])
+
+    def _catalog_location(self, action: dict, path: Path, *, undo=False) -> None:
+        root_id = action['root_id'] if undo else (action.get('destination_root_id') or action['root_id'])
+        relative = action['source_relative'] if undo else action['destination_relative']
+        with self.store._connect() as db:
+            db.execute('UPDATE files SET root_id=?,relative_path=?,name=?,extension=? WHERE id=?',
+                       (root_id, relative, path.name, path.suffix[1:].lower(), action['file_id']))
+        self.store.refresh_root_totals(action['root_id'], action.get('destination_root_id') or action['root_id'])
 
     def dismiss_proposal(self, proposal_id: str) -> None:
         action = self.store.get_file_action(proposal_id=proposal_id)
@@ -223,25 +247,45 @@ class FileActionManager:
             self.store.update_file_action(action["id"], {"status": "applied", "prepared_at": self._iso(now), "applied_at": self._iso(now)})
             return {"status": "applied", "message": "SIMULATED FILE ACTION"}
 
-        root_path = Path(root_row["path"]).resolve(strict=True)
+        root_path = Path(root_row["path"])
+        destination_root = self._destination_root(action)
         abs_source = root_path / action["source_relative"]
-        abs_dest = root_path / action["destination_relative"]
+        abs_dest = destination_root / action["destination_relative"]
         
         self._validate_path_safety(root_path, abs_source)
-        self._validate_path_safety(root_path, abs_dest)
+        self._validate_path_safety(destination_root, abs_dest)
+        if abs_source.stat().st_dev != abs_dest.parent.stat().st_dev:
+            raise ValueError('Cross-drive moves are not supported; choose a destination on the same drive')
         
         # Identity revalidation
         try:
             st = abs_source.stat(follow_symlinks=False)
             if hasattr(st, "st_file_attributes") and (st.st_file_attributes & 0x400):
+                self.store.update_file_action(action["id"], {"status": "failed", "error": "Source is a reparse point"})
                 raise ValueError("Source is a reparse point")
             if abs_source.is_symlink():
+                self.store.update_file_action(action["id"], {"status": "failed", "error": "Source is a symlink"})
                 raise ValueError("Source is a symlink")
                 
             if action["expected_size"] is not None and st.st_size != action["expected_size"]:
+                self.store.update_file_action(action["id"], {"status": "failed", "error": "Source file size changed"})
                 raise ValueError("Source file size changed")
             if action["expected_mtime_ns"] is not None and st.st_mtime_ns != action["expected_mtime_ns"]:
+                self.store.update_file_action(action["id"], {"status": "failed", "error": "Source file modified time changed"})
                 raise ValueError("Source file modified time changed")
+            if action['expected_dev'] is not None and (st.st_dev != action['expected_dev'] or st.st_ino != action['expected_ino']):
+                self.store.update_file_action(action["id"], {"status": "failed", "error": "Source file identity changed"})
+                raise ValueError('Source file identity changed')
+            current_file = self.store.get_file(action['file_id'])
+            if not current_file or current_file['root_id'] != action['root_id'] or current_file['relative_path'] != action['source_relative']:
+                self.store.update_file_action(action["id"], {"status": "failed", "error": "Source catalog location changed"})
+                raise ValueError('Source catalog location changed')
+            with self.store._connect() as db:
+                collision = db.execute('SELECT id FROM files WHERE root_id=? AND relative_path=? AND id!=?',
+                    (action.get('destination_root_id') or action['root_id'], action['destination_relative'], action['file_id'])).fetchone()
+            if collision:
+                self.store.update_file_action(action["id"], {"status": "failed", "error": "Destination is already indexed; rescan before moving"})
+                raise ValueError('Destination is already indexed; rescan before moving')
         except FileNotFoundError:
             self.store.update_file_action(action["id"], {"status": "stale", "error": "Source missing"})
             raise ValueError("Source file missing")
@@ -312,11 +356,7 @@ class FileActionManager:
 
         # Update file catalog only after post-mutation verification succeeds.
         if post_updates.get("status") == "applied":
-            with self.store._connect() as db:
-                db.execute(
-                    "UPDATE files SET relative_path=?, name=?, extension=? WHERE id=?",
-                    (action["destination_relative"], abs_dest.name, abs_dest.suffix[1:].lower(), action["file_id"])
-                )
+            self._catalog_location(action, abs_dest)
             return {"status": "applied", "message": "RENAMED"}
 
         return {"status": "failed", "message": post_updates["error"]}
@@ -325,7 +365,7 @@ class FileActionManager:
         action = self.store.get_file_action(action_id=action_id)
         if not action:
             raise ValueError("Action not found")
-        if action["status"] != "applied":
+        if action["status"] not in ('applied', 'undo_failed'):
             raise ValueError(f"Cannot undo action in status {action['status']}")
             
         with self.store._connect() as db:
@@ -337,12 +377,13 @@ class FileActionManager:
             self.store.update_file_action(action["id"], {"status": "rolled_back", "undone_at": self._iso(self._now())})
             return {"status": "rolled_back", "message": "SIMULATED UNDO"}
             
-        root_path = Path(root_row["path"]).resolve(strict=True)
+        root_path = Path(root_row["path"])
+        destination_root = self._destination_root(action)
         abs_source = root_path / action["source_relative"]
-        abs_dest = root_path / action["destination_relative"]
+        abs_dest = destination_root / action["destination_relative"]
         
         self._validate_path_safety(root_path, abs_source)
-        self._validate_path_safety(root_path, abs_dest)
+        self._validate_path_safety(destination_root, abs_dest)
         
         if abs_source.exists():
             raise ValueError("Undo cannot be completed safely because the original path is occupied.")
@@ -371,11 +412,7 @@ class FileActionManager:
             
         self.store.update_file_action(action["id"], {"status": "rolled_back", "undone_at": self._iso(self._now())})
         
-        with self.store._connect() as db:
-            db.execute(
-                "UPDATE files SET relative_path=?, name=?, extension=? WHERE id=?",
-                (action["source_relative"], abs_source.name, abs_source.suffix[1:].lower(), action["file_id"])
-            )
+        self._catalog_location(action, abs_source, undo=True)
             
         return {"status": "rolled_back", "message": "UNDONE"}
 
@@ -400,10 +437,11 @@ class FileActionManager:
                 root_path = Path(root_row["path"])
                 
             abs_source = root_path / action["source_relative"]
-            abs_dest = root_path / action["destination_relative"]
             try:
+                destination_root = self._destination_root(action)
+                abs_dest = destination_root / action['destination_relative']
                 self._validate_path_safety(root_path, abs_source)
-                self._validate_path_safety(root_path, abs_dest)
+                self._validate_path_safety(destination_root, abs_dest)
             except (ValueError, OSError):
                 self.store.update_file_action(action["id"], {"status": "conflict", "error": "Reconciled: Unsafe or missing approved path"})
                 continue
@@ -443,11 +481,7 @@ class FileActionManager:
                             "post_dev": st.st_dev,
                             "post_ino": st.st_ino
                         })
-                        with self.store._connect() as db:
-                            db.execute(
-                                "UPDATE files SET relative_path=?, name=?, extension=? WHERE id=?",
-                                (action["destination_relative"], abs_dest.name, abs_dest.suffix[1:].lower(), action["file_id"])
-                            )
+                        self._catalog_location(action, abs_dest)
                     else:
                         self.store.update_file_action(action["id"], {"status": "conflict", "error": "Reconciled: Dest exists but identity mismatch"})
                 except OSError:

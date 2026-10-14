@@ -135,6 +135,20 @@ class FileStore:
             for column, definition in migrations.items():
                 if column not in columns:
                     db.execute(f"ALTER TABLE sort_suggestions ADD COLUMN {column} {definition}")
+            for table, additions in {
+                'file_actions': {'destination_root_id': 'INTEGER REFERENCES roots(id)'},
+                'sort_suggestions': {'destination_root_id': 'INTEGER REFERENCES roots(id)', 'source_root_id': 'INTEGER REFERENCES roots(id)', 'project_name': "TEXT NOT NULL DEFAULT ''"},
+                'sort_plans': {'report': "TEXT NOT NULL DEFAULT '{}'"},
+                'roots': {'scan_limit': 'INTEGER NOT NULL DEFAULT 50000'},
+            }.items():
+                present = {row[1] for row in db.execute(f'PRAGMA table_info({table})')}
+                for column, definition in additions.items():
+                    if column not in present:
+                        db.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
+            db.execute('''CREATE TABLE IF NOT EXISTS organization_projects (
+                id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                aliases TEXT NOT NULL DEFAULT '[]', root_id INTEGER NOT NULL REFERENCES roots(id),
+                folder TEXT NOT NULL, created_at TEXT NOT NULL)''')
             file_columns = {row[1] for row in db.execute("PRAGMA table_info(files)")}
             if "inspection_version" not in file_columns:
                 db.execute("ALTER TABLE files ADD COLUMN inspection_version INTEGER NOT NULL DEFAULT 0")
@@ -194,12 +208,13 @@ class FileStore:
     def remove_root(self, root_id: int) -> None:
         with self._connect() as db:
             unresolved = db.execute(
-                "SELECT COUNT(*) FROM file_actions WHERE root_id=? AND status IN ('proposed','prepared','active','applied','undo_failed')",
-                (root_id,),
+                "SELECT COUNT(*) FROM file_actions WHERE (root_id=? OR destination_root_id=?) AND status IN ('proposed','prepared','active','applied','undo_failed')",
+                (root_id, root_id),
             ).fetchone()[0]
             if unresolved:
                 raise ValueError("Resolve file action recovery records before removing this root")
-            db.execute("DELETE FROM file_actions WHERE root_id=?", (root_id,))
+            db.execute("DELETE FROM file_actions WHERE root_id=? OR destination_root_id=?", (root_id, root_id))
+            db.execute("DELETE FROM organization_projects WHERE root_id=?", (root_id,))
             db.execute("DELETE FROM roots WHERE id=?", (root_id,))
 
     def has_unresolved_file_actions(self, root_id: int | None = None) -> bool:
@@ -210,8 +225,8 @@ class FileStore:
                 ).fetchone()
             else:
                 row = db.execute(
-                    "SELECT 1 FROM file_actions WHERE root_id=? AND status IN ('proposed','prepared','active','applied','undo_failed') LIMIT 1",
-                    (root_id,),
+                    "SELECT 1 FROM file_actions WHERE (root_id=? OR destination_root_id=?) AND status IN ('proposed','prepared','active','applied','undo_failed') LIMIT 1",
+                    (root_id, root_id),
                 ).fetchone()
             return row is not None
 
@@ -223,6 +238,7 @@ class FileStore:
             if unresolved:
                 raise ValueError("Resolve file action recovery records before deleting the file catalog")
             db.execute("DELETE FROM file_actions")
+            db.execute("DELETE FROM organization_projects")
             db.execute("DELETE FROM roots")
             db.execute("DELETE FROM files")
             db.execute("DELETE FROM scan_state")
@@ -373,6 +389,7 @@ class FileStore:
                 (plan["id"], plan["root_id"], plan["created_at"], plan["expires_at"], plan["status"],
                  plan["mode"], int(plan.get("create_folders", False)), plan.get("created_dirs", "[]"), plan.get("error")),
             )
+            db.execute('UPDATE sort_plans SET report=? WHERE id=?', (json.dumps(plan.get('report', {})), plan['id']))
             db.executemany(
                 "INSERT INTO sort_suggestions "
                 "(id,plan_id,file_id,source_relative,destination_relative,reason,confidence,selected,status,error,action_id,created_at,content_summary,content_inspected,review_required,review_reason) "
@@ -383,6 +400,29 @@ class FileStore:
                    int(s.get("content_inspected", False)), int(s.get("review_required", False)),
                    s.get("review_reason", "")) for s in suggestions],
             )
+            db.executemany('UPDATE sort_suggestions SET destination_root_id=?,source_root_id=?,project_name=? WHERE id=?',
+                           [(s.get('destination_root_id'), s.get('source_root_id'), s.get('project_name', ''), s['id']) for s in suggestions])
+
+    def get_projects(self) -> list[dict]:
+        with self._connect() as db:
+            rows = [dict(row) for row in db.execute('SELECT * FROM organization_projects ORDER BY name COLLATE NOCASE')]
+        for row in rows:
+            row['aliases'] = json.loads(row['aliases'])
+        return rows
+
+    def save_project(self, name: str, aliases: list[str], root_id: int, folder: str) -> int:
+        with self._connect() as db:
+            db.execute('''INSERT INTO organization_projects(name,aliases,root_id,folder,created_at)
+                VALUES(?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET aliases=excluded.aliases,
+                root_id=excluded.root_id,folder=excluded.folder''',
+                (name, json.dumps(aliases), root_id, folder, datetime.now(timezone.utc).isoformat()))
+            return db.execute('SELECT id FROM organization_projects WHERE name=? COLLATE NOCASE', (name,)).fetchone()[0]
+
+    def refresh_root_totals(self, *root_ids: int) -> None:
+        with self._connect() as db:
+            for root_id in set(root_ids):
+                count, size = db.execute('SELECT COUNT(*),COALESCE(SUM(size_bytes),0) FROM files WHERE root_id=? AND is_directory=0', (root_id,)).fetchone()
+                db.execute('UPDATE roots SET file_count=?,total_bytes=? WHERE id=?', (count, size, root_id))
 
     def get_sort_plan(self, plan_id: str) -> dict | None:
         with self._connect() as db:

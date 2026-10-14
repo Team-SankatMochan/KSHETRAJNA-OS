@@ -96,6 +96,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                   "/files.css": ("files.css", "text/css; charset=utf-8")}
         assets.update({"/chat.js": ("chat.js", "text/javascript; charset=utf-8"),
                        "/chat.css": ("chat.css", "text/css; charset=utf-8")})
+        assets.update({'/workspace.js': ('workspace.js', 'text/javascript; charset=utf-8'),
+                       '/workspace.css': ('workspace.css', 'text/css; charset=utf-8')})
         if path in assets:
             name, content_type = assets[path]
             body = (files("kshetrajna") / "web" / name).read_bytes()
@@ -108,6 +110,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._json(200, self.server.service.report())
         elif path == "/api/files/state" and self.server.file_service:
             self._json(200, self.server.file_service.state())
+        elif path == '/api/files/locations' and self.server.file_service:
+            from .known_folders import discover_scan_locations
+            self._json(200, {'locations': [] if self.server.file_service.demo else discover_scan_locations()})
+        elif path == '/api/files/organization' and self.server.file_service:
+            self._json(200, self.server.file_service.get_organization())
         elif path == "/api/files/known-folders" and self.server.file_service:
             from .known_folders import discover_known_folders
             self._json(200, {"folders": discover_known_folders()})
@@ -278,6 +285,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
             elif path == "/api/demo/scenario":
                 service.change_scenario(body.get("scenario"))
                 self._json(200, {"changed": True})
+            elif path == '/api/files/locations/approve' and self.server.file_service:
+                self._json(200, self.server.file_service.approve_locations(body.get('locations'), consent=body.get('consent')))
+            elif path == '/api/files/projects/save' and self.server.file_service:
+                self._json(200, self.server.file_service.save_project_scope(body.get('name'), body.get('aliases', []),
+                    body.get('root_id'), body.get('folder'), confirm=body.get('confirm')))
+            elif path == '/api/files/projects/remove' and self.server.file_service:
+                self._json(200, self.server.file_service.remove_project_scope(body.get('project_id')))
+            elif path == '/api/files/sort/scope-preview' and self.server.file_service:
+                ids = body.get('root_ids')
+                if not isinstance(ids, list) or not ids:
+                    raise ValueError('Choose approved source locations')
+                self._json(200, self.server.file_service.generate_sort_plan(ids[0], body.get('create_folders', False),
+                    root_ids=ids, prefer_existing=body.get('prefer_existing', False), include_nested=body.get('include_nested', False)))
             elif path == "/api/files/roots/add" and self.server.file_service:
                 if body.get("consent") is not True:
                     raise ValueError("Folder access requires explicit consent")
@@ -296,7 +316,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._json(200, {"deleted": True})
             elif path == "/api/files/actions/propose" and self.server.file_service:
                 self._json(200, self.server.file_service.create_proposal(
-                    self._body_file_id(body, "file_id"), body.get("kind"), body.get("destination")))
+                    self._body_file_id(body, "file_id"), body.get("kind"), body.get("destination"), body.get('destination_root_id')))
             elif path == "/api/files/actions/apply" and self.server.file_service:
                 result = self.server.file_service.apply_action(body.get("proposal_id"))
                 self._json(200 if result.get("status") in ("applied", "deleted") else 409, result)
@@ -312,7 +332,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._json(200 if result.get("status") in ("applied", "partial") else 409, result)
             elif path == "/api/files/sort/preview" and self.server.file_service:
                 self._json(200, self.server.file_service.generate_sort_plan(
-                    self._body_file_id(body, "root_id"), body.get("create_folders", False)))
+                    self._body_file_id(body, "root_id"), body.get("create_folders", False),
+                    prefer_existing=body.get('prefer_existing', False), include_nested=body.get('include_nested', False)))
             elif path == "/api/files/sort/update" and self.server.file_service:
                 self._json(200, self.server.file_service.update_sort_plan(
                     body.get("plan_id"), body.get("suggestions")))

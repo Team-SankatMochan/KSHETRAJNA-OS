@@ -2,7 +2,7 @@
 
 > **The intelligence that knows the field.**
 
-A local Windows workload and file assistant that observes app activity, indexes local files, recognizes workflows, explains resource recommendations, asks for consent, and records outcomes and rollback. This is the end-to-end hackathon prototype, version 0.4.1.
+A local Windows workload and file assistant that observes app activity, indexes local files, recognizes workflows, explains resource recommendations, asks for consent, and records outcomes and rollback. This is the end-to-end hackathon prototype, version 0.4.2.
 
 **Sort AI update:** Automatic batches handle clear loose-file matches, with a
 separate advice queue and remembered keep decisions. Downloads discovery uses
@@ -17,8 +17,8 @@ approved. Historical pitch assets are retained under [`submission/`](submission/
 ### Self-contained Windows bundles
 
 Version 0.4 adds native x64 and ARM64 packages containing Python and the app.
-Download [Intel/AMD x64](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.1/Kshetrajna-Windows-x64.zip)
-or [Snapdragon/ARM64](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.1/Kshetrajna-Windows-arm64.zip).
+Download [Intel/AMD x64](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.2/Kshetrajna-Windows-x64.zip)
+or [Snapdragon/ARM64](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.2/Kshetrajna-Windows-arm64.zip).
 Extract a package and open **Launch.cmd**, or use **Install.cmd** for a verified
 per-user copy and optional desktop shortcut. Use **Quit Kshetrajna** in Privacy
 to stop the background application. See [packaging and verification](docs/WINDOWS_BUNDLES.md).

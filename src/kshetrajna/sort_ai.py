@@ -28,7 +28,7 @@ def automation_eligible(suggestion: dict) -> bool:
 
 
 def build_suggestions(files: list[dict], root_path: Path, *, create_folders: bool = False,
-                      inspect_filesystem: bool = True) -> list[dict]:
+                      inspect_filesystem: bool = True, include_nested: bool = False) -> list[dict]:
     """Build bounded organization proposals from indexed files.
 
     Suggestions never overwrite a destination.  Missing destination folders
@@ -49,7 +49,7 @@ def build_suggestions(files: list[dict], root_path: Path, *, create_folders: boo
         loose = len(parts) == 1
         installer = extension in ('exe', 'msi', 'msix') and any(
             word in name.casefold() for word in ('setup', 'install'))
-        if not loose and not insight['review_required']:
+        if not loose and not insight['review_required'] and not include_nested:
             continue
         unknown = extension not in DOWNLOAD_FOLDERS and insight['content_kind'] in ('document', 'binary') and not insight['content_inspected'] and not installer
         if unknown:

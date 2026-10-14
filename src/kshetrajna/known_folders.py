@@ -82,3 +82,46 @@ def discover_known_folders() -> list[dict]:
             path = one_drive / name
             add(f'onedrive-{name.casefold()}', f'OneDrive {name}', path)
     return candidates
+
+
+def discover_scan_locations() -> list[dict]:
+    """Offer personal folders and fixed-drive data folders for one explicit scope approval.
+
+    Discovery lists immediate directories only. File content indexing starts
+    separately, after approval; system paths and other users are never offered.
+    """
+    from .file_scanner import SENSITIVE_DIRS, GENERATED_DIRS, SYSTEM_DIRS
+    folders = discover_known_folders()
+    seen = {os.path.normcase(str(Path(f['path']).resolve())) for f in folders}
+    excluded = SENSITIVE_DIRS | GENERATED_DIRS | SYSTEM_DIRS | {'users', 'recovery', 'msocache', 'perflogs'}
+    bases = [Path(os.environ.get('USERPROFILE', str(Path.home())))]
+    if os.name == 'nt':
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.GetLogicalDrives.argtypes = []
+        kernel.GetLogicalDrives.restype = ctypes.c_uint32
+        kernel.GetDriveTypeW.argtypes = [ctypes.c_wchar_p]
+        kernel.GetDriveTypeW.restype = ctypes.c_uint32
+        mask = kernel.GetLogicalDrives()
+        bases.extend(Path(f'{chr(65+i)}:/') for i in range(26)
+                     if mask & (1 << i) and kernel.GetDriveTypeW(f'{chr(65+i)}:\\') == 3)
+    for base in bases:
+        try:
+            with os.scandir(base) as entries:
+                for entry in entries:
+                    if len(folders) >= 80:
+                        break
+                    if entry.name.casefold() in excluded or entry.name.startswith('.') or entry.is_symlink():
+                        continue
+                    attrs = getattr(entry.stat(follow_symlinks=False), 'st_file_attributes', 0)
+                    if attrs & 0x400 or not entry.is_dir(follow_symlinks=False):
+                        continue
+                    path = Path(entry.path)
+                    key = os.path.normcase(str(path.resolve()))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    folders.append({'id': 'local-' + str(len(folders)), 'label': path.name,
+                                    'path': str(path), 'kind': 'personal' if base == bases[0] else 'data-folder'})
+        except OSError:
+            continue
+    return folders

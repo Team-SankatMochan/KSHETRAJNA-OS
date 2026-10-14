@@ -15,6 +15,7 @@ from .file_scanner import (walk, extract_excerpt, extract_office_excerpt, TEXT_E
 from .file_insights import generate_insights, analyze_catalog, OFFICE_EXTENSIONS
 from .file_actions import FileActionManager
 from .sort_ai import build_suggestions, automation_eligible
+from .organization import organization_plan, folder_inventory
 from .image_preview import IMAGE_EXTENSIONS, MAX_IMAGE_BYTES, inspect_image
 from .pdf_preview import PDF_EXTENSIONS, MAX_PDF_BYTES, inspect_pdf, extract_pdf_excerpt
 
@@ -77,7 +78,7 @@ class FileService:
         except ValueError:
             return False
 
-    def _validate_root_path(self, path_str: str) -> Path:
+    def _validate_root_path(self, path_str: str, *, batch=False) -> Path:
         if not isinstance(path_str, str) or not path_str or len(path_str) < 3 or '\0' in path_str:
             raise ValueError("Invalid path format")
 
@@ -147,7 +148,7 @@ class FileService:
 
             now_ts = datetime.now(timezone.utc).timestamp()
             recent_creations = [r for r in roots if (now_ts - datetime.fromisoformat(r["created_at"]).timestamp()) < 60]
-            if len(recent_creations) >= 5:
+            if len(recent_creations) >= 5 and not batch:
                 raise ValueError("Rate limit exceeded: max 5 roots per minute")
 
             for root in roots:
@@ -175,6 +176,60 @@ class FileService:
             root_id = self.store.add_root(str(path), label)
             self.rescan_root(root_id)
             return self.store.get_root(root_id)
+
+    def approve_locations(self, locations, *, consent=False) -> dict:
+        if self.demo or consent is not True or not isinstance(locations, list) or not 1 <= len(locations) <= 20:
+            raise ValueError('Approve between 1 and 20 local locations with consent=true')
+        results, skipped = [], []
+        with self._gate:
+            for item in locations:
+                if not isinstance(item, dict) or not isinstance(item.get('label', ''), str):
+                    raise ValueError('Invalid location')
+                try:
+                    path = self._validate_root_path(item.get('path'), batch=True)
+                    root_id = self.store.add_root(str(path), item.get('label', path.name)[:100])
+                    with self.store._connect() as db:
+                        db.execute('UPDATE roots SET scan_limit=200000 WHERE id=?', (root_id,))
+                    self.rescan_root(root_id)
+                    results.append(self.store.get_root(root_id))
+                except (ValueError, OSError) as error:
+                    skipped.append({'path': item.get('path'), 'reason': str(error)})
+        return {'approved': results, 'skipped': skipped}
+
+    def get_organization(self) -> dict:
+        with self._gate:
+            projects = self.store.get_projects()
+            roots = {r['id']: r for r in self.store.get_roots()}
+            for project in projects:
+                project['root_path'] = roots.get(project['root_id'], {}).get('path', '')
+            return {'projects': projects, 'folders': folder_inventory(self.store, inspect=not self.demo),
+                    'roots': list(roots.values())}
+
+    def save_project_scope(self, name, aliases, root_id, folder, *, confirm=False) -> dict:
+        if confirm is not True or not isinstance(name, str) or not 2 <= len(name.strip()) <= 80:
+            raise ValueError('Project scope needs a name and confirm=true')
+        if not isinstance(aliases, list) or len(aliases) > 12 or any(not isinstance(a, str) or not 2 <= len(a.strip()) <= 80 for a in aliases):
+            raise ValueError('Use at most 12 project aliases of 2–80 characters')
+        root_id = self._positive_id(root_id, 'root_id')
+        if not isinstance(folder, str) or len(folder) > 200:
+            raise ValueError('Invalid project folder')
+        self.action_manager.validate_move_proposal(folder + '/scope-check.txt')
+        with self._gate:
+            root = self.store.get_root(root_id)
+            if not root or root['status'] not in ('ready', 'truncated'):
+                raise ValueError('Approve and scan the project destination first')
+            if not self.demo:
+                self.action_manager._validate_path_safety(Path(root['path']), Path(root['path']) / folder)
+            project_id = self.store.save_project(name.strip(), [a.strip() for a in aliases], root_id, folder)
+            return {'id': project_id, 'saved': True}
+
+    def remove_project_scope(self, project_id) -> dict:
+        project_id = self._positive_id(project_id, 'project_id')
+        with self._gate, self.store._connect() as db:
+            db.execute('DELETE FROM organization_projects WHERE id=?', (project_id,))
+            # Existing previews may refer to the removed rule. Require a fresh review.
+            db.execute("UPDATE sort_plans SET status='expired' WHERE status IN ('preview','partial')")
+        return {'removed': True}
 
     def rescan_root(self, root_id: int) -> None:
         root_id = self._positive_id(root_id, "root_id")
@@ -241,9 +296,13 @@ class FileService:
 
             batch = []
             scan_notes = {}
+            with self.store._connect() as db:
+                previous_files = {row['relative_path']: dict(row) for row in db.execute(
+                    'SELECT relative_path,size_bytes,modified_at,excerpt,inspection_version FROM files WHERE root_id=?', (root_id,))}
 
             try:
-                entries = walk(root_path, is_cancelled, scan_notes)
+                entries = (walk(root_path, is_cancelled, scan_notes) if root.get('scan_limit', 50000) == 50000
+                           else walk(root_path, is_cancelled, scan_notes, max_files=root['scan_limit']))
                 for rel_path, entry, info in entries:
                     if is_cancelled():
                         break
@@ -258,8 +317,7 @@ class FileService:
                     ext = Path(name).suffix[1:].lower() if not is_dir else ""
 
                     # Check if unchanged
-                    with self.store._connect() as db:
-                        existing = db.execute("SELECT size_bytes, modified_at, excerpt, inspection_version FROM files WHERE root_id=? AND relative_path=?", (root_id, rel_path)).fetchone()
+                    existing = previous_files.get(rel_path)
 
                     excerpt = ""
                     mime = ""
@@ -412,12 +470,22 @@ class FileService:
         root_path = Path(result["root_path"])
         result["create_folders"] = bool(result.get("create_folders"))
         try:
+            result['report'] = json.loads(result.get('report') or '{}')
+        except (TypeError, json.JSONDecodeError):
+            result['report'] = {}
+        try:
             result["created_dirs"] = json.loads(result.get("created_dirs") or "[]")
         except (TypeError, json.JSONDecodeError):
             result["created_dirs"] = []
         result["suggestions"] = [dict(s) for s in result.get("suggestions", [])]
         folder_cache = {}
+        approved_roots = {r['id']: r for r in self.store.get_roots()}
         for suggestion in result["suggestions"]:
+            source_root = approved_roots.get(suggestion.get('source_root_id') or result['root_id'])
+            destination_root = approved_roots.get(suggestion.get('destination_root_id') or result['root_id'])
+            suggestion['source_root_path'] = source_root['path'] if source_root else ''
+            suggestion['destination_root_path'] = destination_root['path'] if destination_root else ''
+            suggestion['destination_root_label'] = destination_root['label'] if destination_root else 'Unavailable'
             suggestion["selected"] = bool(suggestion.get("selected"))
             suggestion['automation_eligible'] = automation_eligible(suggestion)
             normalized = suggestion["destination_relative"].replace("\\", "/")
@@ -429,11 +497,13 @@ class FileService:
                 suggestion["destination_folder_exists"] = folder in result["created_dirs"]
             else:
                 try:
-                    destination = root_path / folder
-                    if folder not in folder_cache:
-                        self.action_manager._validate_path_safety(root_path, destination)
-                        folder_cache[folder] = destination.is_dir()
-                    suggestion["destination_folder_exists"] = folder_cache[folder]
+                    target_root = Path(suggestion['destination_root_path'])
+                    destination = target_root / folder
+                    key = (str(target_root), folder)
+                    if key not in folder_cache:
+                        self.action_manager._validate_path_safety(target_root, destination)
+                        folder_cache[key] = destination.is_dir()
+                    suggestion["destination_folder_exists"] = folder_cache[key]
                 except (OSError, ValueError):
                     suggestion["destination_folder_exists"] = False
         result['automatic_count'] = sum(s['automation_eligible'] for s in result['suggestions'])
@@ -450,9 +520,9 @@ class FileService:
             raise ValueError("Sort plan not found")
         return plan
 
-    def generate_sort_plan(self, root_id: int, create_folders: bool = False) -> dict:
+    def generate_sort_plan(self, root_id: int, create_folders: bool = False, *, prefer_existing=False, include_nested=False, root_ids=None) -> dict:
         root_id = self._positive_id(root_id, "root_id")
-        if not isinstance(create_folders, bool):
+        if any(type(value) is not bool for value in (create_folders, prefer_existing, include_nested)):
             raise ValueError("create_folders must be a boolean")
         with self._gate:
             root = self.store.get_root(root_id)
@@ -460,9 +530,40 @@ class FileService:
                 raise ValueError("Root not found")
             if root["status"] not in ("ready", "truncated"):
                 raise ValueError("Wait for a complete scan before generating Sort AI suggestions")
-            files = self.store.get_sortable_files(root_id)
-            suggestions = build_suggestions(files, Path(root["path"]), create_folders=create_folders,
-                                            inspect_filesystem=not self.demo)
+            ids = [root_id] if root_ids is None else root_ids
+            if not isinstance(ids, list) or not 1 <= len(ids) <= 20 or any(type(i) is not int or i <= 0 for i in ids):
+                raise ValueError('Choose 1–20 approved source roots')
+            roots = [self.store.get_root(i) for i in dict.fromkeys(ids)]
+            if any(not r or r['status'] not in ('ready', 'truncated') for r in roots):
+                raise ValueError('Wait for the selected scans to finish')
+            inventory = folder_inventory(self.store, inspect=not self.demo)
+            approved_roots = {r['id']: r for r in self.store.get_roots()}
+            projects = [{**p, 'root_path': approved_roots[p['root_id']]['path']} for p in self.store.get_projects() if p['root_id'] in approved_roots]
+            suggestions = []
+            report = {'considered': 0, 'kept': 0, 'suggested': 0, 'remembered_keep': 0, 'reasons': {}, 'project_candidates': [], 'source_roots': [r['id'] for r in roots]}
+            for source_root in roots:
+                files = self.store.get_sortable_files(source_root['id'])
+                items, accounting = organization_plan(files, source_root, projects, inventory,
+                    create_folders=create_folders, inspect=not self.demo, prefer_existing=prefer_existing, include_nested=include_nested)
+                for suggestion in items:
+                    suggestion['source_root_id'] = source_root['id']
+                suggestions.extend(items)
+                for key in ('considered', 'kept', 'suggested'):
+                    report[key] += accounting[key]
+                for key, count in accounting['reasons'].items():
+                    report['reasons'][key] = report['reasons'].get(key, 0) + count
+                report['project_candidates'].extend([{**p, 'source_root_id': source_root['id']} for p in accounting['project_candidates']])
+                with self.store._connect() as db:
+                    report['remembered_keep'] += db.execute('SELECT COUNT(*) FROM files WHERE root_id=? AND sort_keep_size=size_bytes AND sort_keep_modified IS modified_at', (source_root['id'],)).fetchone()[0]
+            # Reject collisions between different source locations in the same batch.
+            destinations = {}
+            for item in suggestions:
+                key = (item['destination_root_id'], item['destination_relative'].casefold())
+                if key in destinations:
+                    for conflict in (item, destinations[key]):
+                        conflict.update(status='blocked', selected=False, review_required=True,
+                                        error='Multiple source locations target this filename; choose a different destination.')
+                destinations[key] = item
             now = datetime.now(timezone.utc)
             plan = {
                 "id": uuid.uuid4().hex,
@@ -474,6 +575,7 @@ class FileService:
                 "create_folders": create_folders,
                 "created_dirs": "[]",
                 "error": None,
+                'report': report,
             }
             for suggestion in suggestions:
                 suggestion["id"] = uuid.uuid4().hex
@@ -502,15 +604,24 @@ class FileService:
                     raise ValueError("selected must be a boolean")
                 if known[patch["id"]]["status"] in ("applied", "rolled_back", "undo_failed"):
                     raise ValueError("Completed file actions cannot be edited")
-                destination = patch.get("destination_relative", known[patch["id"]]["destination_relative"])
+                item = known[patch['id']]
+                target_id = patch.get('destination_root_id', item.get('destination_root_id') or plan['root_id'])
+                target_id = self._positive_id(target_id, 'destination_root_id')
+                target_root = self.store.get_root(target_id)
+                if not target_root or target_root['status'] not in ('ready', 'truncated'):
+                    raise ValueError('Destination must be an approved, scanned folder')
+                self._assert_no_scan(target_id)
+                destination = patch.get("destination_relative", item["destination_relative"])
                 if not isinstance(destination, str) or len(destination) > 240:
                     raise ValueError("Invalid destination path")
                 destination = destination.replace('\\', '/')
                 self.action_manager.validate_move_proposal(destination)
                 source = known[patch["id"]]["source_relative"]
                 blocked = None
-                destination_path = Path(root["path"]) / destination
-                if destination.lower() == source.lower():
+                destination_path = Path(target_root['path']) / destination
+                if not self.demo:
+                    self.action_manager._validate_path_safety(Path(target_root['path']), destination_path)
+                if target_id == (item.get('source_root_id') or plan['root_id']) and destination.lower() == source.lower():
                     blocked = "Destination is unchanged"
                 elif destination_path.exists():
                     blocked = "A file already exists at the proposed destination"
@@ -518,6 +629,7 @@ class FileService:
                     blocked = "Destination folder does not exist; enable folder creation for this plan"
                 self.store.update_sort_suggestion(patch["id"], {
                     "destination_relative": destination,
+                    'destination_root_id': target_id,
                     "selected": int(patch["selected"] and blocked is None),
                     "status": "blocked" if blocked else "suggested",
                     "error": blocked,
@@ -580,11 +692,40 @@ class FileService:
             with self.store._connect() as db:
                 for suggestion in chosen:
                     db.execute('UPDATE files SET sort_keep_size=size_bytes, sort_keep_modified=modified_at WHERE id=? AND root_id=? AND relative_path=?',
-                               (suggestion['file_id'], plan['root_id'], suggestion['source_relative']))
+                               (suggestion['file_id'], suggestion.get('source_root_id') or plan['root_id'], suggestion['source_relative']))
                     db.execute("UPDATE sort_suggestions SET selected=0,status='dismissed',error=NULL WHERE id=?", (suggestion['id'],))
             return self._sort_plan_view(self._sort_plan(plan_id))
 
     def _prepare_sort_directories(self, plan: dict, selected: list[dict], root_path: Path) -> list[str]:
+        # Each destination remains tied to its approved root in the durable journal.
+        roots = {r['id']: r for r in self.store.get_roots()}
+        missing = {}
+        for suggestion in selected:
+            root_id = suggestion.get('destination_root_id') or plan['root_id']
+            root = roots.get(root_id)
+            if not root or root['status'] not in ('ready', 'truncated'):
+                raise ValueError('Destination root is unavailable or being scanned')
+            self._assert_no_scan(root_id)
+            base = Path(root['path'])
+            directory = (base / suggestion['destination_relative']).parent
+            self.action_manager._validate_path_safety(base, directory)
+            current = directory
+            while not current.exists():
+                missing[(root_id, current.as_posix())] = (base, current)
+                current = current.parent
+        if missing and not plan['create_folders']:
+            raise ValueError('A destination folder is missing; regenerate with folder creation enabled')
+        records = [{'root_id': root_id, 'relative': path.relative_to(base).as_posix()}
+                   for (root_id, _), (base, path) in missing.items()]
+        previous = json.loads(plan.get('created_dirs') or '[]')
+        combined = previous + [r for r in records if r not in previous]
+        self.store.update_sort_plan(plan['id'], {'status': 'applying', 'created_dirs': json.dumps(combined)})
+        for base, directory in sorted(missing.values(), key=lambda pair: len(pair[1].parts)):
+            self.action_manager._validate_path_safety(base, directory)
+            directory.mkdir(exist_ok=False)
+        return records
+
+    def _prepare_legacy_sort_directories(self, plan: dict, selected: list[dict], root_path: Path) -> list[str]:
         required: set[Path] = set()
         for suggestion in selected:
             required.add((root_path / suggestion["destination_relative"]).parent)
@@ -614,10 +755,18 @@ class FileService:
             directories = json.loads(plan.get("created_dirs") or "[]")
         except (TypeError, json.JSONDecodeError):
             directories = []
-        for relative in sorted(directories, key=lambda value: value.count('/'), reverse=True):
-            directory = root_path / relative
+        def relative_value(value):
+            return value.get('relative', '') if isinstance(value, dict) else value
+        for record in sorted(directories, key=lambda value: relative_value(value).count('/'), reverse=True):
             try:
-                self.action_manager._validate_path_safety(root_path, directory)
+                base = root_path
+                if isinstance(record, dict):
+                    target = self.store.get_root(record['root_id'])
+                    if not target or target['status'] == 'scanning':
+                        continue
+                    base = Path(target['path'])
+                directory = base / relative_value(record)
+                self.action_manager._validate_path_safety(base, directory)
                 directory.rmdir()
             except (OSError, ValueError):
                 # A non-empty or changed directory is deliberately left for
@@ -638,6 +787,11 @@ class FileService:
             selected = [s for s in plan["suggestions"] if s["selected"] and s["status"] == "suggested"]
             if not selected:
                 raise ValueError("Select at least one unblocked suggestion")
+            if len(selected) > 500:
+                raise ValueError('Select at most 500 files per batch')
+            for suggestion in selected:
+                self._assert_no_scan(suggestion.get('source_root_id') or plan['root_id'])
+                self._assert_no_scan(suggestion.get('destination_root_id') or plan['root_id'])
 
             root_path = Path(root["path"]).resolve(strict=True) if not self.demo else Path(root["path"])
             try:
@@ -660,10 +814,11 @@ class FileService:
                 try:
                     with self.store._connect() as db:
                         source = db.execute('SELECT root_id,relative_path FROM files WHERE id=?', (suggestion['file_id'],)).fetchone()
-                    if not source or source['root_id'] != plan['root_id'] or source['relative_path'] != suggestion['source_relative']:
+                    if not source or source['root_id'] != (suggestion.get('source_root_id') or plan['root_id']) or source['relative_path'] != suggestion['source_relative']:
                         raise ValueError('The source moved since this preview; rescan before sorting')
                     action = self.action_manager.create_proposal(
-                        suggestion["file_id"], "MOVE", suggestion["destination_relative"], plan["mode"]
+                        suggestion["file_id"], "MOVE", suggestion["destination_relative"], plan["mode"],
+                        destination_root_id=suggestion.get('destination_root_id') or plan['root_id'],
                     )
                     self.store.update_sort_suggestion(suggestion["id"], {"status": "applying", "action_id": action["id"], "error": None})
                     result = self.action_manager.apply_action(action["proposal_id"])
@@ -672,6 +827,14 @@ class FileService:
                     self.store.update_sort_suggestion(suggestion["id"], {"status": "applied", "error": None})
                     applied.append({"suggestion_id": suggestion["id"], "action_id": action["id"], "status": "applied"})
                 except (OSError, ValueError, TypeError) as error:
+                    action_id = suggestion.get("action_id")
+                    if action_id:
+                        try:
+                            act = self.store.get_file_action(action_id)
+                            if act and act.get("status") in ("proposed", "prepared"):
+                                self.store.update_file_action(action_id, {"status": "failed", "error": str(error)})
+                        except Exception:
+                            pass
                     self.store.update_sort_suggestion(suggestion["id"], {"status": "failed", "error": str(error)})
                     failed.append({"suggestion_id": suggestion["id"], "status": "failed", "error": str(error)})
 
@@ -936,18 +1099,22 @@ class FileService:
             if root_id in self._active_scans:
                 raise ValueError("Wait for the current scan to finish before changing files.")
 
-    def create_proposal(self, file_id: int, kind: str, destination_relative: str) -> dict:
+    def create_proposal(self, file_id: int, kind: str, destination_relative: str, destination_root_id=None) -> dict:
         file_id = self._positive_id(file_id, "file_id")
         mode = "demo" if self.demo else "live"
         file_row = self.store.get_file(file_id)
         if file_row:
             self._assert_no_scan(file_row["root_id"])
-        return self.action_manager.create_proposal(file_id, kind, destination_relative, mode)
+        if destination_root_id is not None:
+            destination_root_id = self._positive_id(destination_root_id, 'destination_root_id')
+            self._assert_no_scan(destination_root_id)
+        return self.action_manager.create_proposal(file_id, kind, destination_relative, mode, destination_root_id=destination_root_id)
 
     def apply_action(self, proposal_id: str) -> dict:
         action = self.store.get_file_action(proposal_id=proposal_id)
         if action:
             self._assert_no_scan(action["root_id"])
+            self._assert_no_scan(action.get('destination_root_id') or action['root_id'])
         with self._gate:
             return self.action_manager.apply_action(proposal_id)
 
@@ -955,6 +1122,7 @@ class FileService:
         action = self.store.get_file_action(action_id=action_id)
         if action:
             self._assert_no_scan(action["root_id"])
+            self._assert_no_scan(action.get('destination_root_id') or action['root_id'])
         with self._gate:
             return self.action_manager.undo_action(action_id)
 

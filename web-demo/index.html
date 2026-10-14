@@ -3,60 +3,794 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Explore Kshetrajna, a privacy-first Windows assistant for workflows, resources and local files. Interactive synthetic demo.">
+  <meta name="description" content="Kshetrajna — A privacy-first Windows assistant that understands your workspace. Smart file organization, project detection, and workflow intelligence.">
+  <meta name="theme-color" content="#0a0d14">
+  <meta property="og:title" content="Kshetrajna — Your field, understood">
+  <meta property="og:description" content="A privacy-first Windows assistant with intelligent full-laptop file sorting, automatic project clustering, and workspace intelligence. 100% on-device.">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Kshetrajna OS">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Kshetrajna — Your field, understood">
+  <meta name="twitter:description" content="A privacy-first Windows assistant with intelligent full-laptop file sorting, automatic project clustering, and workspace intelligence. 100% on-device.">
   <title>Kshetrajna — Your field, understood</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <script src="demo.js" defer></script>
 </head>
 <body>
-  <aside class="sidebar">
-    <a class="brand" href="#"><span class="brand-mark">K</span><span>Kshetrajna<small>THE KNOWER OF THE FIELD</small></span></a>
-    <div class="edition">WEB DEMO + WINDOWS APP</div>
-    <nav aria-label="Explore the demo">
-      <button class="nav-item active" data-prompt="Show my PC overview"><span>◈</span> Overview</button>
-      <button class="nav-item" data-prompt="Help me free RAM"><span>✧</span> Assistant</button>
-      <button class="nav-item" data-prompt="Predict my next workflow"><span>⌁</span> Workflows</button>
-      <button class="nav-item" data-prompt="Organize my Downloads"><span>▦</span> Sort AI</button>
-      <button class="nav-item" data-prompt="Review temporary files"><span>⊙</span> Maintenance</button>
-      <button class="nav-item" data-prompt="Explain privacy controls"><span>◇</span> Privacy</button>
-    </nav>
-    <div class="sidebar-bottom"><span class="status-dot"></span> Synthetic session<small>Nothing on your PC is accessed.</small><a href="https://github.com/Team-SankatMochan/KSHETRAJNA-OS" target="_blank" rel="noopener noreferrer">View project ↗</a></div>
-  </aside>
-  <main>
-    <header><span>YOUR WORKSPACE / OVERVIEW</span><div class="header-actions"><span class="demo-badge">SIMULATED DATA</span><button id="reset" class="quiet">Reset demo</button></div></header>
-    <section class="intro"><div><div class="eyebrow">CONTEXT BEFORE CONTROL</div><h1>Your field, understood.</h1><p>A calmer way to manage your Windows workspace.<br>Observe, understand, review — then act.</p></div><a class="local-link" href="#local-setup">Run on your PC ↓<small>Real data and reviewed Windows actions</small></a></section>
-    <section id="local-setup" class="local-setup" aria-labelledby="setup-title">
-      <div class="setup-heading"><div><div class="eyebrow">YOUR COMPUTER · YOUR DATA</div><h2 id="setup-title">Use the full app on your Windows laptop.</h2><p>Start it once on your own PC. Your dashboard, telemetry and approved actions run locally.</p></div><span class="demo-badge">WINDOWS x64 / ARM64</span></div>
-      <div class="setup-steps">
-        <article><span class="step-number">01</span><h3>Choose your Windows download</h3><p>Python is included. Choose <strong>x64</strong> for Intel or AMD, or <strong>ARM64</strong> for Snapdragon. Both are small, self-contained beta packages.</p><a class="download-app" href="https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.1/Kshetrajna-Windows-x64.zip">Intel / AMD · x64 ↓</a><a class="download-app" href="https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.1/Kshetrajna-Windows-arm64.zip">Snapdragon · ARM64 ↓</a><a href="https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/tag/v0.4.1" target="_blank" rel="noopener noreferrer">Release notes & checksums ↗</a></article>
-        <article><span class="step-number">02</span><h3>Extract & launch</h3><p>Choose <strong>Extract All</strong>, open the <strong>Kshetrajna</strong> folder inside it, then open <strong>Launch.cmd</strong>. No Python or Git installation is needed. For a per-user copy and desktop shortcut, run <strong>Install.cmd</strong>.</p></article>
-        <article><span class="step-number">03</span><h3>Open your local dashboard</h3><p>The launcher opens it automatically. Enable collection and the desired controls in Privacy. Review and approve each action on your computer.</p><a href="http://127.0.0.1:8765/#chat" target="_blank" rel="noopener noreferrer">Open my local dashboard ↗</a></article>
+  <!-- Ambient background effects -->
+  <div class="ambient-glow"></div>
+  <div class="grid-overlay"></div>
+
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="#">
+      <div class="brand-mark">
+        <span>K</span>
+        <div class="brand-pulse"></div>
       </div>
-      <details><summary>Optional: add AI conversation, without an API key</summary><p>Install <a href="https://ollama.com/download/windows" target="_blank" rel="noopener noreferrer">Ollama for Windows</a> and download a local model suitable for your device. Start Kshetrajna, select the installed model in Chat, and enable local AI. Live PC tools work without a model. Model speed and runtime compatibility depend on your hardware; Snapdragon inference needs separate device testing.</p></details>
-      <details><summary>Setup help, updates and stopping the app</summary><p>If the local page cannot be reached, start <strong>Launch.cmd</strong> first. Open <strong>Console.cmd</strong> for startup errors. If port 8765 is busy, use <strong>Console.cmd --port 8767</strong> and open the printed address. To stop, choose <strong>Quit Kshetrajna</strong> in Privacy. Download a fresh version for updates; history stays in your Windows user profile. <a href="https://github.com/Team-SankatMochan/KSHETRAJNA-OS/blob/main/docs/WINDOWS_QUICKSTART.md" target="_blank" rel="noopener noreferrer">Full setup guide ↗</a></p></details>
-      <details><summary>Prefer running from source?</summary><p><a href="https://github.com/Team-SankatMochan/KSHETRAJNA-OS/archive/refs/heads/main.zip">Download the source</a>, install <a href="https://www.python.org/downloads/release/python-31316/" target="_blank" rel="noopener noreferrer">Python 3.13</a> for your Windows architecture, extract the source, and open <strong>start_here.cmd</strong>. The prebuilt downloads above already include Python.</p></details>
-      <p class="setup-boundary">Native x64 and ARM64 packages passed source and packaged-app checks. These are unsigned beta archives with local setup, not signed MSI/EXE installers. The hosted site does not receive your dashboard data or control your PC. The local link opens the app on the device you are browsing from.</p>
+      <div class="brand-text">
+        <span class="brand-name">Kshetrajna</span>
+        <small>THE KNOWER OF THE FIELD</small>
+      </div>
+    </a>
+    <div class="edition">INTERACTIVE DEMO</div>
+    <nav aria-label="Explore the demo">
+      <button class="nav-item active" data-section="overview" data-prompt="Show my PC overview">
+        <span class="nav-icon">◈</span>
+        <span class="nav-label">Overview</span>
+      </button>
+      <button class="nav-item" data-section="assistant" data-prompt="Help me free RAM">
+        <span class="nav-icon">✧</span>
+        <span class="nav-label">Assistant</span>
+      </button>
+      <button class="nav-item" data-section="workflows" data-prompt="Predict my next workflow">
+        <span class="nav-icon">⌁</span>
+        <span class="nav-label">Workflows</span>
+      </button>
+      <button class="nav-item" data-section="sort-ai" data-prompt="Launch Sort AI scan">
+        <span class="nav-icon">▦</span>
+        <span class="nav-label">Sort AI</span>
+        <span class="nav-badge">NEW</span>
+      </button>
+      <button class="nav-item" data-section="maintenance" data-prompt="Review temporary files">
+        <span class="nav-icon">⊙</span>
+        <span class="nav-label">Maintenance</span>
+      </button>
+      <button class="nav-item" data-section="privacy" data-prompt="Explain privacy controls">
+        <span class="nav-icon">◇</span>
+        <span class="nav-label">Privacy</span>
+      </button>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="session-info">
+        <span class="status-dot"></span>
+        <span>Synthetic session</span>
+      </div>
+      <small>Nothing on your PC is accessed.</small>
+      <a href="https://github.com/Team-SankatMochan/KSHETRAJNA-OS" target="_blank" rel="noopener noreferrer">
+        View project on GitHub ↗
+      </a>
+    </div>
+  </aside>
+
+  <button class="mobile-menu-toggle" id="mobile-toggle" aria-label="Toggle menu">
+    <span></span><span></span><span></span>
+  </button>
+
+  <main>
+    <header>
+      <div class="breadcrumb">
+        <span class="breadcrumb-icon">◈</span>
+        <span id="header-breadcrumb">YOUR WORKSPACE / OVERVIEW</span>
+      </div>
+      <div class="header-actions">
+        <span class="demo-badge"><span class="badge-dot"></span>SIMULATED DATA</span>
+        <button id="reset" class="quiet">Reset demo</button>
+      </div>
+    </header>
+
+    <!-- ========== HERO / INTRO ========== -->
+    <section class="intro">
+      <div class="intro-content">
+        <div class="eyebrow">CONTEXT BEFORE CONTROL</div>
+        <h1>Your field, <span class="gradient-text">understood.</span></h1>
+        <p>A calmer way to manage your Windows workspace.<br>Observe, understand, review — then act.</p>
+      </div>
+      <a class="local-link" href="#local-setup">
+        <span class="link-icon">↓</span>
+        <div>
+          <span>Run on your PC</span>
+          <small>Real data and reviewed Windows actions</small>
+        </div>
+      </a>
     </section>
-    <div class="notice"><span>◌</span><p><strong>Explore with sample data.</strong> This hosted demo uses scripted chat replies and simulated actions. Live telemetry, file access, PC control and an installed local AI model run in the Windows app.</p></div>
+
+    <!-- ========== METRICS ========== -->
     <section class="metrics" aria-label="Synthetic system metrics">
-      <article class="metric"><span>CPU usage <small>DEMO</small></span><div><strong>24<span>%</span></strong><svg viewBox="0 0 110 35" aria-hidden="true"><path d="M0 30 L12 24 L20 26 L30 12 L40 19 L49 10 L60 16 L70 6 L80 13 L91 12 L110 17"/></svg></div><p>Current workload · Developing</p></article>
-      <article class="metric"><span>Memory in use <small>DEMO</small></span><div><strong id="memory">10.8<span> / 16 GB</span></strong></div><progress id="memory-bar" max="16" value="10.8" aria-label="Synthetic RAM usage"></progress><p>Sample readings, never a benchmark</p></article>
-      <article class="metric"><span>Workflow signal <small>DEMO</small></span><div><strong class="word">Development</strong></div><p>Editor → browser → terminal</p></article>
+      <article class="metric metric-cpu">
+        <div class="metric-header">
+          <span class="metric-label">CPU usage</span>
+          <span class="metric-tag">DEMO</span>
+        </div>
+        <div class="metric-body">
+          <strong class="metric-value">24<span class="metric-unit">%</span></strong>
+          <svg class="spark-line" viewBox="0 0 120 40" aria-hidden="true">
+            <defs>
+              <linearGradient id="spark-grad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="rgba(139,166,255,0.3)"/>
+                <stop offset="100%" stop-color="rgba(139,166,255,0)"/>
+              </linearGradient>
+            </defs>
+            <path class="spark-fill" d="M0 35 L12 28 L20 30 L30 16 L40 23 L49 14 L60 20 L70 10 L80 17 L91 16 L110 21 L120 18 L120 40 L0 40 Z" fill="url(#spark-grad)"/>
+            <path class="spark-stroke" d="M0 35 L12 28 L20 30 L30 16 L40 23 L49 14 L60 20 L70 10 L80 17 L91 16 L110 21 L120 18"/>
+          </svg>
+        </div>
+        <p class="metric-sub">Current workload · Developing</p>
+      </article>
+      <article class="metric metric-mem">
+        <div class="metric-header">
+          <span class="metric-label">Memory in use</span>
+          <span class="metric-tag">DEMO</span>
+        </div>
+        <div class="metric-body">
+          <strong class="metric-value" id="memory">10.8<span class="metric-unit"> / 16 GB</span></strong>
+        </div>
+        <div class="memory-bar-wrap">
+          <div class="memory-bar" id="memory-bar" style="--fill:67.5%"></div>
+        </div>
+        <p class="metric-sub">Sample readings, never a benchmark</p>
+      </article>
+      <article class="metric metric-workflow">
+        <div class="metric-header">
+          <span class="metric-label">Workflow signal</span>
+          <span class="metric-tag">DEMO</span>
+        </div>
+        <div class="metric-body">
+          <strong class="metric-value metric-word">Development</strong>
+        </div>
+        <p class="metric-sub">Editor → browser → terminal</p>
+      </article>
     </section>
+
+    <!-- ========== NOTICE ========== -->
+    <div class="notice">
+      <span class="notice-icon">◌</span>
+      <p><strong>Explore with sample data.</strong> This demo uses scripted replies and simulated actions. Live telemetry, file access, PC control and a local AI model run in the Windows app.</p>
+    </div>
+
+    <!-- ========== SORT AI PANEL ========== -->
+    <section class="sort-ai-hero" id="sort-ai-section">
+      <div class="sort-ai-header">
+        <div>
+          <div class="eyebrow">INTELLIGENT FILE ORGANIZATION</div>
+          <h2>Sort AI <span class="gradient-text">Deep Scan</span></h2>
+          <p>Full-laptop index scanning with project detection, smart categorization, and one-click organization across your entire filesystem.</p>
+        </div>
+        <button class="scan-trigger" id="start-scan">
+          <span class="scan-icon">⟳</span>
+          Launch Full Scan
+        </button>
+      </div>
+
+      <!-- Scan Permission Modal -->
+      <div class="scan-permission" id="scan-permission" style="display:none;">
+        <div class="permission-card">
+          <div class="permission-icon">🔍</div>
+          <h3>Full Laptop Scan Request</h3>
+          <p>Kshetrajna wants to scan your entire filesystem to index, categorize, and organize files. This includes:</p>
+          <ul class="permission-scope">
+            <li><span>📁</span> Desktop, Downloads, Documents, Pictures, Videos</li>
+            <li><span>💼</span> OneDrive, project directories, and workspaces</li>
+            <li><span>🗂️</span> External drives and custom folders</li>
+            <li><span>🔒</span> System folders are excluded automatically</li>
+          </ul>
+          <p class="permission-note">Files are never uploaded. All indexing happens locally. You review every move before it happens.</p>
+          <div class="permission-actions">
+            <button class="quiet" id="deny-scan">Not now</button>
+            <button class="primary" id="approve-scan">Approve & Scan</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Scan Progress -->
+      <div class="scan-progress" id="scan-progress" style="display:none;">
+        <div class="progress-header">
+          <div class="progress-status">
+            <span class="scanning-dot"></span>
+            <span id="scan-status-text">Indexing filesystem...</span>
+          </div>
+          <span class="progress-percent" id="scan-percent">0%</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" id="scan-fill"></div>
+        </div>
+        <div class="scan-live-stats">
+          <div class="live-stat">
+            <span class="live-stat-value" id="live-indexed">0</span>
+            <span class="live-stat-label">Indexes scanned</span>
+          </div>
+          <div class="live-stat">
+            <span class="live-stat-value" id="live-categorized">0</span>
+            <span class="live-stat-label">Files categorized</span>
+          </div>
+          <div class="live-stat">
+            <span class="live-stat-value" id="live-projects">0</span>
+            <span class="live-stat-label">Projects detected</span>
+          </div>
+          <div class="live-stat">
+            <span class="live-stat-value" id="live-unchanged">0</span>
+            <span class="live-stat-label">Already organized</span>
+          </div>
+        </div>
+        <div class="scan-current-path" id="scan-current-path">
+          Preparing scan engine...
+        </div>
+      </div>
+
+      <!-- Scan Results -->
+      <div class="scan-results" id="scan-results" style="display:none;">
+        <!-- Summary Cards -->
+        <div class="result-summary">
+          <div class="summary-card summary-total">
+            <div class="summary-icon">📊</div>
+            <div class="summary-value">38,247</div>
+            <div class="summary-label">Total Indexes Scanned</div>
+            <div class="summary-sub">Across all approved directories</div>
+          </div>
+          <div class="summary-card summary-sorted">
+            <div class="summary-icon">✅</div>
+            <div class="summary-value">385</div>
+            <div class="summary-label">Files Auto-Sorted</div>
+            <div class="summary-sub">Ready for review & approval</div>
+          </div>
+          <div class="summary-card summary-unchanged">
+            <div class="summary-icon">📌</div>
+            <div class="summary-value">37,862</div>
+            <div class="summary-label">Remained Unchanged</div>
+            <div class="summary-sub">Already in correct locations</div>
+          </div>
+          <div class="summary-card summary-projects">
+            <div class="summary-icon">🎯</div>
+            <div class="summary-value">7</div>
+            <div class="summary-label">Projects Detected</div>
+            <div class="summary-sub">Auto-grouped by project name</div>
+          </div>
+        </div>
+
+        <!-- Sort Breakdown -->
+        <div class="sort-breakdown">
+          <div class="breakdown-header">
+            <h3>Sort Breakdown</h3>
+            <div class="breakdown-tabs">
+              <button class="breakdown-tab active" data-tab="categories">By Category</button>
+              <button class="breakdown-tab" data-tab="projects">By Project</button>
+              <button class="breakdown-tab" data-tab="actions">Action Log</button>
+            </div>
+          </div>
+
+          <!-- Categories Tab -->
+          <div class="breakdown-content active" id="tab-categories">
+            <div class="category-grid">
+              <div class="category-item">
+                <div class="category-icon" style="--cat-color:#60a5fa">📄</div>
+                <div class="category-info">
+                  <span class="category-name">Documents</span>
+                  <span class="category-count">87 files</span>
+                </div>
+                <div class="category-bar"><div class="category-fill" style="--fill:22.6%;--cat-color:#60a5fa"></div></div>
+                <span class="category-detail">.pdf .docx .txt .md → Documents/</span>
+              </div>
+              <div class="category-item">
+                <div class="category-icon" style="--cat-color:#f472b6">🖼️</div>
+                <div class="category-info">
+                  <span class="category-name">Images</span>
+                  <span class="category-count">104 files</span>
+                </div>
+                <div class="category-bar"><div class="category-fill" style="--fill:27%;--cat-color:#f472b6"></div></div>
+                <span class="category-detail">.png .jpg .svg .webp → Pictures/</span>
+              </div>
+              <div class="category-item">
+                <div class="category-icon" style="--cat-color:#a78bfa">💻</div>
+                <div class="category-info">
+                  <span class="category-name">Code & Scripts</span>
+                  <span class="category-count">62 files</span>
+                </div>
+                <div class="category-bar"><div class="category-fill" style="--fill:16.1%;--cat-color:#a78bfa"></div></div>
+                <span class="category-detail">.py .js .dart .html → Projects/</span>
+              </div>
+              <div class="category-item">
+                <div class="category-icon" style="--cat-color:#34d399">🎬</div>
+                <div class="category-info">
+                  <span class="category-name">Media</span>
+                  <span class="category-count">43 files</span>
+                </div>
+                <div class="category-bar"><div class="category-fill" style="--fill:11.2%;--cat-color:#34d399"></div></div>
+                <span class="category-detail">.mp4 .mp3 .wav → Media/</span>
+              </div>
+              <div class="category-item">
+                <div class="category-icon" style="--cat-color:#fbbf24">📦</div>
+                <div class="category-info">
+                  <span class="category-name">Archives</span>
+                  <span class="category-count">28 files</span>
+                </div>
+                <div class="category-bar"><div class="category-fill" style="--fill:7.3%;--cat-color:#fbbf24"></div></div>
+                <span class="category-detail">.zip .rar .7z → Archives/</span>
+              </div>
+              <div class="category-item">
+                <div class="category-icon" style="--cat-color:#fb923c">📋</div>
+                <div class="category-info">
+                  <span class="category-name">Spreadsheets</span>
+                  <span class="category-count">34 files</span>
+                </div>
+                <div class="category-bar"><div class="category-fill" style="--fill:8.8%;--cat-color:#fb923c"></div></div>
+                <span class="category-detail">.xlsx .csv .xls → Documents/Sheets/</span>
+              </div>
+              <div class="category-item">
+                <div class="category-icon" style="--cat-color:#e879f9">🎨</div>
+                <div class="category-info">
+                  <span class="category-name">Design Files</span>
+                  <span class="category-count">18 files</span>
+                </div>
+                <div class="category-bar"><div class="category-fill" style="--fill:4.7%;--cat-color:#e879f9"></div></div>
+                <span class="category-detail">.fig .psd .ai .xd → Design/</span>
+              </div>
+              <div class="category-item">
+                <div class="category-icon" style="--cat-color:#94a3b8">📎</div>
+                <div class="category-info">
+                  <span class="category-name">Miscellaneous</span>
+                  <span class="category-count">9 files</span>
+                </div>
+                <div class="category-bar"><div class="category-fill" style="--fill:2.3%;--cat-color:#94a3b8"></div></div>
+                <span class="category-detail">Uncategorized → Review/</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Projects Tab -->
+          <div class="breakdown-content" id="tab-projects">
+            <div class="project-grid">
+              <div class="project-card">
+                <div class="project-header-card">
+                  <div class="project-avatar" style="--proj-color:#8b5cf6">A</div>
+                  <div>
+                    <h4>Aarthika</h4>
+                    <span class="project-type">Finance App · Flutter</span>
+                  </div>
+                  <span class="project-file-count">23 files</span>
+                </div>
+                <div class="project-files">
+                  <div class="file-move">
+                    <span class="file-name">aarthika_budget_v2.dart</span>
+                    <span class="file-arrow">→</span>
+                    <span class="file-dest">Projects/Aarthika/lib/</span>
+                  </div>
+                  <div class="file-move">
+                    <span class="file-name">aarthika_logo_final.png</span>
+                    <span class="file-arrow">→</span>
+                    <span class="file-dest">Projects/Aarthika/assets/</span>
+                  </div>
+                  <div class="file-move">
+                    <span class="file-name">aarthika_wireframe.fig</span>
+                    <span class="file-arrow">→</span>
+                    <span class="file-dest">Projects/Aarthika/design/</span>
+                  </div>
+                  <span class="more-files">+20 more files detected</span>
+                </div>
+                <div class="project-action-row">
+                  <span class="project-status found">✓ Existing folder found</span>
+                  <span class="project-path">D:\Projects\Aarthika\</span>
+                </div>
+              </div>
+
+              <div class="project-card">
+                <div class="project-header-card">
+                  <div class="project-avatar" style="--proj-color:#06b6d4">N</div>
+                  <div>
+                    <h4>NaviiGo</h4>
+                    <span class="project-type">Travel App · Flutter</span>
+                  </div>
+                  <span class="project-file-count">31 files</span>
+                </div>
+                <div class="project-files">
+                  <div class="file-move">
+                    <span class="file-name">navigo_map_widget.dart</span>
+                    <span class="file-arrow">→</span>
+                    <span class="file-dest">NaviiGo-App/lib/widgets/</span>
+                  </div>
+                  <div class="file-move">
+                    <span class="file-name">navigo_trip_planner_v3.dart</span>
+                    <span class="file-arrow">→</span>
+                    <span class="file-dest">NaviiGo-App/lib/features/</span>
+                  </div>
+                  <div class="file-move">
+                    <span class="file-name">navigo_splash.png</span>
+                    <span class="file-arrow">→</span>
+                    <span class="file-dest">NaviiGo-App/assets/images/</span>
+                  </div>
+                  <span class="more-files">+28 more files detected</span>
+                </div>
+                <div class="project-action-row">
+                  <span class="project-status found">✓ Existing folder found</span>
+                  <span class="project-path">Desktop\NaviiGo-App\</span>
+                </div>
+              </div>
+
+              <div class="project-card">
+                <div class="project-header-card">
+                  <div class="project-avatar" style="--proj-color:#f59e0b">K</div>
+                  <div>
+                    <h4>Kshetrajna-OS</h4>
+                    <span class="project-type">Desktop Agent · Python</span>
+                  </div>
+                  <span class="project-file-count">18 files</span>
+                </div>
+                <div class="project-files">
+                  <div class="file-move">
+                    <span class="file-name">kshetrajna_test_results.md</span>
+                    <span class="file-arrow">→</span>
+                    <span class="file-dest">KshetRajna-OS/reports/</span>
+                  </div>
+                  <div class="file-move">
+                    <span class="file-name">kshetrajna_architecture.pdf</span>
+                    <span class="file-arrow">→</span>
+                    <span class="file-dest">KshetRajna-OS/docs/</span>
+                  </div>
+                  <span class="more-files">+16 more files detected</span>
+                </div>
+                <div class="project-action-row">
+                  <span class="project-status found">✓ Existing folder found</span>
+                  <span class="project-path">Desktop\KshetRajna-OS\</span>
+                </div>
+              </div>
+
+              <div class="project-card">
+                <div class="project-header-card">
+                  <div class="project-avatar" style="--proj-color:#ec4899">S</div>
+                  <div>
+                    <h4>SankatMochan</h4>
+                    <span class="project-type">Team Assets · Mixed</span>
+                  </div>
+                  <span class="project-file-count">14 files</span>
+                </div>
+                <div class="project-files">
+                  <div class="file-move">
+                    <span class="file-name">sankatmochan_pitch_deck.pptx</span>
+                    <span class="file-arrow">→</span>
+                    <span class="file-dest">Projects/SankatMochan/</span>
+                  </div>
+                  <div class="file-move">
+                    <span class="file-name">team_logo_variants.zip</span>
+                    <span class="file-arrow">→</span>
+                    <span class="file-dest">Projects/SankatMochan/brand/</span>
+                  </div>
+                  <span class="more-files">+12 more files detected</span>
+                </div>
+                <div class="project-action-row">
+                  <span class="project-status created">+ New folder created</span>
+                  <span class="project-path">Projects\SankatMochan\</span>
+                </div>
+              </div>
+
+              <div class="project-card">
+                <div class="project-header-card">
+                  <div class="project-avatar" style="--proj-color:#10b981">C</div>
+                  <div>
+                    <h4>College-Notes</h4>
+                    <span class="project-type">Academic · Documents</span>
+                  </div>
+                  <span class="project-file-count">42 files</span>
+                </div>
+                <div class="project-files">
+                  <div class="file-move">
+                    <span class="file-name">DSA_Week4_Notes.pdf</span>
+                    <span class="file-arrow">→</span>
+                    <span class="file-dest">College-Notes/DSA/</span>
+                  </div>
+                  <div class="file-move">
+                    <span class="file-name">OS_Assignment_3.docx</span>
+                    <span class="file-arrow">→</span>
+                    <span class="file-dest">College-Notes/OS/</span>
+                  </div>
+                  <span class="more-files">+40 more files detected</span>
+                </div>
+                <div class="project-action-row">
+                  <span class="project-status found">✓ Existing folder found</span>
+                  <span class="project-path">Documents\College-Notes\</span>
+                </div>
+              </div>
+
+              <div class="project-card">
+                <div class="project-header-card">
+                  <div class="project-avatar" style="--proj-color:#6366f1">H</div>
+                  <div>
+                    <h4>Hackathon-2026</h4>
+                    <span class="project-type">Competition · Mixed</span>
+                  </div>
+                  <span class="project-file-count">11 files</span>
+                </div>
+                <div class="project-files">
+                  <div class="file-move">
+                    <span class="file-name">hackathon_submission_final.pdf</span>
+                    <span class="file-arrow">→</span>
+                    <span class="file-dest">Projects/Hackathon-2026/</span>
+                  </div>
+                  <span class="more-files">+10 more files detected</span>
+                </div>
+                <div class="project-action-row">
+                  <span class="project-status created">+ New folder created</span>
+                  <span class="project-path">Projects\Hackathon-2026\</span>
+                </div>
+              </div>
+
+              <div class="project-card">
+                <div class="project-header-card">
+                  <div class="project-avatar" style="--proj-color:#f43f5e">P</div>
+                  <div>
+                    <h4>Photography</h4>
+                    <span class="project-type">Personal · Images</span>
+                  </div>
+                  <span class="project-file-count">58 files</span>
+                </div>
+                <div class="project-files">
+                  <div class="file-move">
+                    <span class="file-name">IMG_20261003_sunset.jpg</span>
+                    <span class="file-arrow">→</span>
+                    <span class="file-dest">Pictures/Photography/2026/</span>
+                  </div>
+                  <span class="more-files">+57 more files detected</span>
+                </div>
+                <div class="project-action-row">
+                  <span class="project-status found">✓ Existing folder found</span>
+                  <span class="project-path">Pictures\Photography\</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Action Log Tab -->
+          <div class="breakdown-content" id="tab-actions">
+            <div class="action-log">
+              <div class="log-entry">
+                <span class="log-time">00:00</span>
+                <span class="log-icon scan-log">⟳</span>
+                <div>
+                  <span class="log-text">Full scan initiated — indexing C:\Users\parra\</span>
+                  <span class="log-meta">Scope: Desktop, Downloads, Documents, Pictures, Videos, OneDrive, D:\Projects</span>
+                </div>
+              </div>
+              <div class="log-entry">
+                <span class="log-time">00:04</span>
+                <span class="log-icon index-log">📇</span>
+                <div>
+                  <span class="log-text">38,247 file indexes built across 2,814 directories</span>
+                  <span class="log-meta">Fingerprinting complete · 127.3 GB total scanned</span>
+                </div>
+              </div>
+              <div class="log-entry">
+                <span class="log-time">00:06</span>
+                <span class="log-icon detect-log">🎯</span>
+                <div>
+                  <span class="log-text">7 project clusters detected by name analysis</span>
+                  <span class="log-meta">Aarthika (23), NaviiGo (31), Kshetrajna-OS (18), SankatMochan (14), College-Notes (42), Hackathon-2026 (11), Photography (58)</span>
+                </div>
+              </div>
+              <div class="log-entry">
+                <span class="log-time">00:07</span>
+                <span class="log-icon sort-log">📁</span>
+                <div>
+                  <span class="log-text">385 files matched to categories and destinations</span>
+                  <span class="log-meta">87 docs · 104 images · 62 code · 43 media · 28 archives · 34 sheets · 18 design · 9 misc</span>
+                </div>
+              </div>
+              <div class="log-entry">
+                <span class="log-time">00:07</span>
+                <span class="log-icon check-log">✓</span>
+                <div>
+                  <span class="log-text">37,862 files verified in correct locations — no action needed</span>
+                  <span class="log-meta">98.99% of indexed files are already well-organized</span>
+                </div>
+              </div>
+              <div class="log-entry">
+                <span class="log-time">00:08</span>
+                <span class="log-icon folder-log">📂</span>
+                <div>
+                  <span class="log-text">5 existing project folders located on the filesystem</span>
+                  <span class="log-meta">Matched: Aarthika, NaviiGo-App, KshetRajna-OS, College-Notes, Photography</span>
+                </div>
+              </div>
+              <div class="log-entry">
+                <span class="log-time">00:08</span>
+                <span class="log-icon create-log">+</span>
+                <div>
+                  <span class="log-text">2 new project folders proposed for creation</span>
+                  <span class="log-meta">SankatMochan → Projects\SankatMochan\ · Hackathon-2026 → Projects\Hackathon-2026\</span>
+                </div>
+              </div>
+              <div class="log-entry highlight-entry">
+                <span class="log-time">00:08</span>
+                <span class="log-icon ready-log">🟢</span>
+                <div>
+                  <span class="log-text">Sort plan ready — awaiting your review and approval</span>
+                  <span class="log-meta">No files moved until you approve. Each batch can be individually reviewed.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Approval Section -->
+        <div class="sort-approval">
+          <div class="approval-header">
+            <h3>Review & Approve</h3>
+            <p>Each batch requires explicit approval. Nothing moves until you say so.</p>
+          </div>
+          <div class="approval-cards">
+            <div class="approval-item" data-batch="projects">
+              <div class="approval-left">
+                <span class="approval-icon">🎯</span>
+                <div>
+                  <strong>Project Files (197 files)</strong>
+                  <span>Move detected project files to their respective folders</span>
+                </div>
+              </div>
+              <button class="approve-btn" data-action="approve-projects">Review & Approve</button>
+            </div>
+            <div class="approval-item" data-batch="categories">
+              <div class="approval-left">
+                <span class="approval-icon">📂</span>
+                <div>
+                  <strong>Category Sort (188 files)</strong>
+                  <span>Organize remaining files by type into standard folders</span>
+                </div>
+              </div>
+              <button class="approve-btn" data-action="approve-categories">Review & Approve</button>
+            </div>
+            <div class="approval-item" data-batch="new-folders">
+              <div class="approval-left">
+                <span class="approval-icon">📁</span>
+                <div>
+                  <strong>Create 2 New Folders</strong>
+                  <span>SankatMochan and Hackathon-2026 in Projects\</span>
+                </div>
+              </div>
+              <button class="approve-btn" data-action="approve-folders">Review & Approve</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== WORKSPACE: CHAT + SIDEBAR ========== -->
     <section class="workspace">
       <div class="chat-panel">
-        <div class="panel-heading"><div><span class="assistant-symbol">✧</span><h2>Your assistant</h2></div><span class="muted">Scripted demo · No API key</span></div>
+        <div class="panel-heading">
+          <div class="panel-heading-left">
+            <span class="assistant-symbol">✧</span>
+            <h2>Your assistant</h2>
+          </div>
+          <span class="muted">Scripted demo · No API key</span>
+        </div>
         <div id="messages" class="messages" role="log" aria-label="Demo conversation" aria-live="polite"></div>
-        <div class="composer-wrap"><div class="shortcuts"><button data-prompt="Help me free RAM">Free RAM ↗</button><button data-prompt="Review idle apps">Review apps ↗</button><button data-prompt="Organize my Downloads">Sort files ↗</button><button data-prompt="Predict my next workflow">Predict workflow ↗</button></div><form id="chat-form"><label class="sr-only" for="prompt">Ask the demo assistant</label><input id="prompt" placeholder="Ask about memory, files or your workflow…" maxlength="2000" autocomplete="off"><button type="submit" aria-label="Send message">↑</button></form><small>Messages stay in this tab. Reset or reload clears the session.</small></div>
+        <div class="composer-wrap">
+          <div class="shortcuts">
+            <button data-prompt="Help me free RAM">Free RAM ↗</button>
+            <button data-prompt="Review idle apps">Review apps ↗</button>
+            <button data-prompt="Launch Sort AI scan">Sort files ↗</button>
+            <button data-prompt="Predict my next workflow">Predict workflow ↗</button>
+          </div>
+          <form id="chat-form">
+            <label class="sr-only" for="prompt">Ask the demo assistant</label>
+            <input id="prompt" placeholder="Ask about memory, files, projects, or your workflow…" maxlength="2000" autocomplete="off">
+            <button type="submit" aria-label="Send message">↑</button>
+          </form>
+          <small>Messages stay in this tab. Reset or reload clears the session.</small>
+        </div>
       </div>
       <aside class="insights">
-        <article class="side-card"><div class="eyebrow">EXPLAINABLE BY DESIGN</div><h2>You stay in control.</h2><ol><li><span>01</span><div><strong>Observe</strong><p>Read the workload and approved folders.</p></div></li><li><span>02</span><div><strong>Understand</strong><p>Find routines and explain suggestions.</p></div></li><li><span>03</span><div><strong>Review & approve</strong><p>See scope and risks before any change.</p></div></li><li><span>04</span><div><strong>Measure & reverse</strong><p>Log results. Undo supported actions.</p></div></li></ol></article>
-        <article class="side-card controls"><h2>Demo controls</h2><p>Enable an action type before reviewing it.</p><label><span>Memory & cleanup</span><input id="allow-maintenance" type="checkbox"></label><label><span>Close background apps</span><input id="allow-close" type="checkbox"></label><label><span>File organization</span><input id="allow-sort" type="checkbox"></label><small>These toggles affect this simulation only.</small></article>
-        <article class="side-card journal"><h2>Action journal</h2><ul id="journal"><li>No actions yet. Every approval is recorded here.</li></ul></article>
+        <article class="side-card principles-card">
+          <div class="eyebrow">EXPLAINABLE BY DESIGN</div>
+          <h2>You stay in control.</h2>
+          <ol>
+            <li>
+              <span class="step-num">01</span>
+              <div><strong>Observe</strong><p>Read workload and approved folders.</p></div>
+            </li>
+            <li>
+              <span class="step-num">02</span>
+              <div><strong>Understand</strong><p>Find routines and explain suggestions.</p></div>
+            </li>
+            <li>
+              <span class="step-num">03</span>
+              <div><strong>Review & approve</strong><p>See scope and risks before any change.</p></div>
+            </li>
+            <li>
+              <span class="step-num">04</span>
+              <div><strong>Measure & reverse</strong><p>Log results. Undo supported actions.</p></div>
+            </li>
+          </ol>
+        </article>
+        <article class="side-card controls-card">
+          <h2>Demo controls</h2>
+          <p>Enable an action type before reviewing it.</p>
+          <label><span>Memory & cleanup</span><input id="allow-maintenance" type="checkbox"></label>
+          <label><span>Close background apps</span><input id="allow-close" type="checkbox"></label>
+          <label><span>File organization</span><input id="allow-sort" type="checkbox"></label>
+          <small>These toggles affect this simulation only.</small>
+        </article>
+        <article class="side-card journal-card">
+          <h2>Action journal</h2>
+          <ul id="journal"><li>No actions yet. Every approval is recorded here.</li></ul>
+        </article>
       </aside>
     </section>
-    <footer>LOCAL FIRST. HUMAN APPROVED.<span>Windows x64 & ARM64 design · Snapdragon device validation documented in the repository</span></footer>
+
+    <!-- ========== LOCAL SETUP ========== -->
+    <section id="local-setup" class="local-setup" aria-labelledby="setup-title">
+      <div class="setup-heading">
+        <div>
+          <div class="eyebrow">YOUR COMPUTER · YOUR DATA</div>
+          <h2 id="setup-title">Use the full app on your Windows laptop.</h2>
+          <p>Start it once on your own PC. Your dashboard, telemetry and approved actions run locally.</p>
+        </div>
+        <span class="demo-badge">WINDOWS x64 / ARM64</span>
+      </div>
+      <div class="setup-steps">
+        <article>
+          <span class="step-number">01</span>
+          <h3>Choose your Windows download</h3>
+          <p>Python is included. Choose <strong>x64</strong> for Intel or AMD, or <strong>ARM64</strong> for Snapdragon. Both are small, self-contained beta packages.</p>
+          <a class="download-app" href="https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.2/Kshetrajna-Windows-x64.zip">Intel / AMD · x64 ↓</a>
+          <a class="download-app" href="https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.2/Kshetrajna-Windows-arm64.zip">Snapdragon · ARM64 ↓</a>
+          <a href="https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/tag/v0.4.2" target="_blank" rel="noopener noreferrer">Release notes & checksums ↗</a>
+        </article>
+        <article>
+          <span class="step-number">02</span>
+          <h3>Extract & launch</h3>
+          <p>Choose <strong>Extract All</strong>, open the <strong>Kshetrajna</strong> folder inside it, then open <strong>Launch.cmd</strong>. No Python or Git installation is needed. For a per-user copy and desktop shortcut, run <strong>Install.cmd</strong>.</p>
+        </article>
+        <article>
+          <span class="step-number">03</span>
+          <h3>Open your local dashboard</h3>
+          <p>The launcher opens it automatically. Enable collection and the desired controls in Privacy. Review and approve each action on your computer.</p>
+          <a href="http://127.0.0.1:8765/#chat" target="_blank" rel="noopener noreferrer">Open my local dashboard ↗</a>
+        </article>
+      </div>
+      <details>
+        <summary>Optional: add AI conversation, without an API key</summary>
+        <p>Install <a href="https://ollama.com/download/windows" target="_blank" rel="noopener noreferrer">Ollama for Windows</a> and download a local model suitable for your device. Start Kshetrajna, select the installed model in Chat, and enable local AI. Live PC tools work without a model.</p>
+      </details>
+      <details>
+        <summary>Setup help, updates and stopping the app</summary>
+        <p>If the local page cannot be reached, start <strong>Launch.cmd</strong> first. Open <strong>Console.cmd</strong> for startup errors. If port 8765 is busy, use <strong>Console.cmd --port 8767</strong>. To stop, choose <strong>Quit Kshetrajna</strong> in Privacy.</p>
+      </details>
+      <details>
+        <summary>Prefer running from source?</summary>
+        <p><a href="https://github.com/Team-SankatMochan/KSHETRAJNA-OS/archive/refs/heads/main.zip">Download the source</a>, install <a href="https://www.python.org/downloads/release/python-31316/" target="_blank" rel="noopener noreferrer">Python 3.13</a>, extract, and open <strong>start_here.cmd</strong>.</p>
+      </details>
+      <p class="setup-boundary">Native x64 and ARM64 packages passed source and packaged-app checks. These are unsigned beta archives with local setup. The hosted site does not receive your dashboard data or control your PC.</p>
+    </section>
+
+    <footer>
+      <span>LOCAL FIRST. HUMAN APPROVED.</span>
+      <span>Windows x64 & ARM64 · Snapdragon device validation documented in the repository</span>
+    </footer>
   </main>
-  <dialog id="review-dialog" aria-labelledby="review-title"><div class="eyebrow">REVIEW BEFORE APPROVAL · DEMO</div><h2 id="review-title"></h2><p id="review-detail"></p><p id="review-risk" class="risk"></p><div class="dialog-actions"><button id="cancel-review" class="quiet">Cancel</button><button id="approve-review" class="primary">Approve simulation</button></div></dialog>
+
+  <!-- Review Dialog -->
+  <dialog id="review-dialog" aria-labelledby="review-title">
+    <div class="dialog-inner">
+      <div class="eyebrow">REVIEW BEFORE APPROVAL · DEMO</div>
+      <h2 id="review-title"></h2>
+      <p id="review-detail"></p>
+      <p id="review-risk" class="risk"></p>
+      <div class="dialog-actions">
+        <button id="cancel-review" class="quiet">Cancel</button>
+        <button id="approve-review" class="primary">Approve simulation</button>
+      </div>
+    </div>
+  </dialog>
 </body>
 </html>
