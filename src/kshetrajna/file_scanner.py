@@ -41,6 +41,7 @@ SENSITIVE_NAMES = frozenset({
 SENSITIVE_EXTENSIONS = frozenset({'pem', 'key', 'p12', 'pfx', 'jks', 'keystore'})
 
 SENSITIVE_DIRS = frozenset({'.git', '.ssh', '.aws'})
+GENERATED_DIRS = frozenset({'node_modules', '.venv', 'venv', '__pycache__', '.cache', '.next'})
 
 
 def is_sensitive_file(name: str, extension: str, relative: str) -> bool:
@@ -130,7 +131,7 @@ def extract_office_excerpt(file_path: Path, max_bytes: int = MAX_EXCERPT_BYTES) 
     except (OSError, zipfile.BadZipFile, RuntimeError, ValueError):
         return ""
 
-def walk(root: Path, is_cancelled: Callable[[], bool] = lambda: False) -> Generator[Tuple[str, os.DirEntry, os.stat_result], None, None]:
+def walk(root: Path, is_cancelled: Callable[[], bool] = lambda: False, notes: dict | None = None) -> Generator[Tuple[str, os.DirEntry, os.stat_result], None, None]:
     """Iterative directory walk using os.scandir."""
     try:
         resolved_root = root.resolve(strict=True)
@@ -138,6 +139,9 @@ def walk(root: Path, is_cancelled: Callable[[], bool] = lambda: False) -> Genera
         return
 
     seen_count = 0
+    notes = notes if notes is not None else {}
+    def skipped(kind):
+        notes[kind] = notes.get(kind, 0) + 1
     stack = [(root, "", 0)]  # (absolute_path, relative_prefix, depth)
 
     while stack:
@@ -146,10 +150,15 @@ def walk(root: Path, is_cancelled: Callable[[], bool] = lambda: False) -> Genera
 
         current, prefix, depth = stack.pop()
         if depth > MAX_DEPTH:
+            skipped('depth_limit')
             continue
         try:
-            entries = list(os.scandir(current))
+            with os.scandir(current) as directory:
+                entries = list(directory)
         except (PermissionError, OSError):
+            if current == root:
+                raise PermissionError('Cannot read the approved folder; check its availability and permissions')
+            skipped('unreadable')
             continue
 
         for entry in sorted(entries, key=lambda e: e.name.lower()):
@@ -159,10 +168,12 @@ def walk(root: Path, is_cancelled: Callable[[], bool] = lambda: False) -> Genera
             try:
                 info = entry.stat(follow_symlinks=False)
             except (PermissionError, OSError):
+                skipped('unreadable')
                 continue
 
             attrs = getattr(info, 'st_file_attributes', 0)
             if attrs & FILE_ATTRIBUTE_REPARSE_POINT or entry.is_symlink():
+                skipped('linked_or_cloud')
                 continue
 
             relative = prefix + "/" + entry.name if prefix else entry.name
@@ -175,6 +186,9 @@ def walk(root: Path, is_cancelled: Callable[[], bool] = lambda: False) -> Genera
                 continue
 
             if entry.is_dir(follow_symlinks=False):
+                if entry.name.casefold() in SENSITIVE_DIRS | GENERATED_DIRS:
+                    skipped('excluded_folders')
+                    continue
                 stack.append((Path(entry.path), relative, depth + 1))
             elif stat.S_ISREG(info.st_mode):
                 seen_count += 1

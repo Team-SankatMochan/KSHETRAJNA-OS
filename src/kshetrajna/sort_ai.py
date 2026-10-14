@@ -8,8 +8,8 @@ as untrusted input by the file-action safety checks before a mutation.
 
 from pathlib import Path
 
-from .file_insights import generate_insights
-from .file_scanner import SENSITIVE_DIRS, SENSITIVE_NAMES, SENSITIVE_EXTENSIONS
+from .file_insights import analyze_catalog, DOWNLOAD_FOLDERS
+from .file_scanner import is_sensitive_file
 
 
 CATEGORY_FOLDERS = {
@@ -18,6 +18,13 @@ CATEGORY_FOLDERS = {
     "Media": "Media",
     "Document": "Documents",
 }
+
+def automation_eligible(suggestion: dict) -> bool:
+    """Only clear, unblocked loose-file moves enter the automatic batch."""
+    return (suggestion.get('status') == 'suggested'
+            and not suggestion.get('review_required')
+            and suggestion.get('confidence', 0) >= 88
+            and '/' not in suggestion.get('source_relative', '').replace('\\', '/'))
 
 
 def build_suggestions(files: list[dict], root_path: Path, *, create_folders: bool = False,
@@ -30,42 +37,49 @@ def build_suggestions(files: list[dict], root_path: Path, *, create_folders: boo
     for movement by this organizer.
     """
     existing = {str(row["relative_path"]).replace('\\', '/').lower() for row in files}
+    analyzed = analyze_catalog(files)
     suggestions: list[dict] = []
-    for file_row in files:
+    for file_row, insight in zip(files, analyzed):
         name = str(file_row.get("name", ""))
         relative = str(file_row.get("relative_path", "")).replace('\\', '/')
         extension = str(file_row.get("extension", "")).lower()
         parts = relative.split('/')
-        if not name or not relative or any(part.lower() in SENSITIVE_DIRS for part in parts[:-1]):
+        if not name or not relative or is_sensitive_file(name, extension, relative):
             continue
-        if name.lower() in SENSITIVE_NAMES or extension in SENSITIVE_EXTENSIONS:
+        loose = len(parts) == 1
+        installer = extension in ('exe', 'msi', 'msix') and any(
+            word in name.casefold() for word in ('setup', 'install'))
+        if not loose and not insight['review_required']:
             continue
-
-        insight = generate_insights(
-            name,
-            extension,
-            relative,
-            str(file_row.get("excerpt", "")),
-            size_bytes=file_row.get("size_bytes", 0),
-        )
+        unknown = extension not in DOWNLOAD_FOLDERS and insight['content_kind'] in ('document', 'binary') and not insight['content_inspected'] and not installer
+        if unknown:
+            insight = {**insight, 'review_required': True,
+                       'review_reason': 'The file type or purpose is unclear; choose a destination or keep it here.',
+                       'decision_confidence': 'low'}
         destination = insight.get("suggested_destination") or f"{insight.get('suggested_folder') or CATEGORY_FOLDERS.get(insight['suggested_category'], 'Documents')}/{name}"
         folder = destination.rsplit('/', 1)[0] if '/' in destination else ""
         if relative.lower() == destination.lower():
-            continue
+            if not insight['review_required']:
+                continue
+            blocked_reason = insight['review_reason'] or 'This file needs your decision before moving.'
+        else:
+            blocked_reason = None
 
         destination_path = root_path / folder
         # Check both the catalog and the current filesystem.  A user may have
         # created a destination after the last scan, so the catalog alone is
         # not enough to prevent an overwrite.
-        conflict = destination.lower() in existing or (inspect_filesystem and (root_path / destination).exists())
+        conflict = relative.casefold() != destination.casefold() and (
+            destination.lower() in existing or (inspect_filesystem and (root_path / destination).exists()))
         folder_exists = inspect_filesystem and destination_path.is_dir()
-        blocked_reason = None
         selected = True
         if conflict:
             blocked_reason = "A file already exists at the proposed destination"
             selected = False
         elif not folder_exists and not create_folders:
             blocked_reason = "Destination folder does not exist; enable folder creation for this plan"
+            selected = False
+        if blocked_reason:
             selected = False
 
         confidence = 94 if insight.get("decision_confidence") == "high" else 88 if insight.get("decision_confidence") == "medium" else 78

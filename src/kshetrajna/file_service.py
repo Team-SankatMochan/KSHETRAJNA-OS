@@ -14,7 +14,7 @@ from .file_scanner import (walk, extract_excerpt, extract_office_excerpt, TEXT_E
                            is_sensitive_file, INSPECTION_VERSION)
 from .file_insights import generate_insights, analyze_catalog, OFFICE_EXTENSIONS
 from .file_actions import FileActionManager
-from .sort_ai import build_suggestions
+from .sort_ai import build_suggestions, automation_eligible
 from .image_preview import IMAGE_EXTENSIONS, MAX_IMAGE_BYTES, inspect_image
 from .pdf_preview import PDF_EXTENSIONS, MAX_PDF_BYTES, inspect_pdf, extract_pdf_excerpt
 
@@ -44,6 +44,10 @@ class FileService:
     def state(self) -> dict:
         with self._gate:
             roots = self.store.get_roots()
+            with self.store._connect() as db:
+                progress = {row['root_id']: dict(row) for row in db.execute('SELECT * FROM scan_state')}
+            for root in roots:
+                root['scan'] = progress.get(root['id'], {})
             stats = self.store.get_stats()
             return {"mode": "demo" if self.demo else "live", "roots": roots, "stats": stats,
                     "sort_plans": self.store.get_sort_plans()}
@@ -199,14 +203,14 @@ class FileService:
         while True:
             with self._gate:
                 if not self._active_scans:
-                    break
+                    self._scan_thread = None
+                    return
                 root_id = next(iter(self._active_scans))
             
             self._run_scan(root_id)
             
-            with self._gate:
-                self._active_scans.discard(root_id)
-                self._cancel_events.pop(root_id, None)
+            # _run_scan publishes status and clears its gate atomically. Do
+            # not erase a rescan requested after that terminal status appears.
 
     def _run_scan(self, root_id: int):
         root = self.store.get_root(root_id)
@@ -219,7 +223,7 @@ class FileService:
         start_time = datetime.now(timezone.utc).isoformat()
         try:
             with self.store._connect() as db:
-                db.execute("UPDATE scan_state SET started_at=? WHERE root_id=?", (start_time, root_id))
+                db.execute("UPDATE scan_state SET started_at=?, finished_at=NULL, files_seen=0 WHERE root_id=?", (start_time, root_id))
                 last_pass = db.execute("SELECT last_pass FROM scan_state WHERE root_id=?", (root_id,)).fetchone()[0]
                 current_pass = last_pass + 1
                 db.execute("UPDATE scan_state SET last_pass=? WHERE root_id=?", (current_pass, root_id))
@@ -236,9 +240,10 @@ class FileService:
             truncated = False
 
             batch = []
+            scan_notes = {}
 
             try:
-                entries = walk(root_path, is_cancelled)
+                entries = walk(root_path, is_cancelled, scan_notes)
                 for rel_path, entry, info in entries:
                     if is_cancelled():
                         break
@@ -274,6 +279,8 @@ class FileService:
 
                     if len(batch) >= 200:
                         self._flush_batch(batch)
+                        with self.store._connect() as db:
+                            db.execute('UPDATE scan_state SET files_seen=? WHERE root_id=?', (seen, root_id))
                         batch = []
             except ScanTruncated:
                 truncated = True
@@ -296,6 +303,7 @@ class FileService:
                     removed = res.rowcount
                     db.execute("UPDATE scan_state SET files_removed=? WHERE root_id=?", (removed, root_id))
                     
+                errors += scan_notes.get('unreadable', 0)
                 db.execute("UPDATE scan_state SET finished_at=?, files_seen=?, files_new=?, files_changed=?, errors=? WHERE root_id=?", 
                            (end_time, seen, new, changed, errors, root_id))
                            
@@ -306,17 +314,17 @@ class FileService:
             # Publish a terminal status only after the in-memory scan gate is
             # cleared. Callers use both signals to decide whether mutations
             # are safe, so they must become visible in the same order.
-            self._finish_scan(root_id, status, file_count=count, total_size=total_size)
+            messages = []
+            for key, description in (('linked_or_cloud', 'linked/cloud-only entries'), ('excluded_folders', 'protected/generated folders'),
+                                     ('unreadable', 'unreadable entries'), ('depth_limit', 'folders beyond the depth limit')):
+                if scan_notes.get(key):
+                    messages.append(f"{scan_notes[key]} {description}")
+            note = 'Skipped ' + ', '.join(messages) + '.' if messages else None
+            self._finish_scan(root_id, status, error=note, file_count=count, total_size=total_size)
             
         except Exception as e:
             logging.getLogger(__name__).exception("Scan failed")
             self._finish_scan(root_id, "error", error=str(e))
-        finally:
-            with self._gate:
-                if root_id in self._active_scans:
-                    self._active_scans.remove(root_id)
-                if root_id in self._cancel_events:
-                    del self._cancel_events[root_id]
 
     def _flush_batch(self, batch):
         with self.store._connect() as db:
@@ -344,9 +352,12 @@ class FileService:
         if ext in OFFICE_EXTENSIONS:
             return extract_office_excerpt(full_path)
         if ext in PDF_EXTENSIONS:
-            if full_path.stat().st_size > MAX_PDF_BYTES:
+            try:
+                if full_path.stat().st_size > MAX_PDF_BYTES:
+                    return ''
+                return extract_pdf_excerpt(full_path.read_bytes())
+            except (OSError, ValueError):
                 return ""
-            return extract_pdf_excerpt(full_path.read_bytes())
             
         return ""
 
@@ -408,7 +419,9 @@ class FileService:
         folder_cache = {}
         for suggestion in result["suggestions"]:
             suggestion["selected"] = bool(suggestion.get("selected"))
-            folder = suggestion["destination_relative"].replace("\\", "/").rsplit("/", 1)[0]
+            suggestion['automation_eligible'] = automation_eligible(suggestion)
+            normalized = suggestion["destination_relative"].replace("\\", "/")
+            folder = normalized.rsplit("/", 1)[0] if '/' in normalized else ''
             suggestion["destination_folder"] = folder
             if self.demo:
                 # Demo paths are synthetic; displaying an idea must not inspect
@@ -423,6 +436,10 @@ class FileService:
                     suggestion["destination_folder_exists"] = folder_cache[folder]
                 except (OSError, ValueError):
                     suggestion["destination_folder_exists"] = False
+        result['automatic_count'] = sum(s['automation_eligible'] for s in result['suggestions'])
+        result['review_count'] = sum(s['status'] in ('suggested', 'blocked', 'failed') and not s['automation_eligible'] for s in result['suggestions'])
+        result['batch_limit'] = 500
+        result['scan_partial'] = bool(root and root['status'] == 'truncated')
         return result
 
     def _sort_plan(self, plan_id: str) -> dict:
@@ -441,7 +458,7 @@ class FileService:
             root = self.store.get_root(root_id)
             if not root:
                 raise ValueError("Root not found")
-            if root["status"] != "ready":
+            if root["status"] not in ("ready", "truncated"):
                 raise ValueError("Wait for a complete scan before generating Sort AI suggestions")
             files = self.store.get_sortable_files(root_id)
             suggestions = build_suggestions(files, Path(root["path"]), create_folders=create_folders,
@@ -507,13 +524,16 @@ class FileService:
                 })
             return self._sort_plan_view(self._sort_plan(plan_id))
 
-    def approve_sort_idea(self, plan_id: str, *, folder=None, suggestion_id=None,
+    def approve_sort_idea(self, plan_id: str, *, folder=None, suggestion_id=None, suggestion_ids=None,
                           confirm=False) -> dict:
         """Apply exactly the conversational folder/file idea the user approved."""
         if confirm is not True:
             raise ValueError("Approving a sort idea requires confirm=true")
-        if (folder is None) == (suggestion_id is None):
+        if sum(value is not None for value in (folder, suggestion_id, suggestion_ids)) != 1:
             raise ValueError("Choose a folder idea or a single file idea")
+        if suggestion_ids is not None and (not isinstance(suggestion_ids, list) or not 1 <= len(suggestion_ids) <= 500
+                or any(not isinstance(value, str) for value in suggestion_ids)):
+            raise ValueError('Choose between 1 and 500 suggestion IDs')
         with self._gate:
             plan = self._sort_plan(plan_id)
             if plan["status"] not in ("preview", "partial"):
@@ -521,14 +541,48 @@ class FileService:
             eligible = [s for s in plan["suggestions"] if s["status"] == "suggested"]
             selected = [s for s in eligible if
                         (suggestion_id is not None and s["id"] == suggestion_id) or
+                        (suggestion_ids is not None and s['id'] in suggestion_ids) or
                         (folder is not None and s["destination_relative"].rsplit("/", 1)[0] == folder)]
             if not selected:
                 raise ValueError("No eligible files remain in this idea")
             chosen = {s["id"] for s in selected}
-            patches = [{"id": s["id"], "selected": s["id"] in chosen}
-                       for s in plan["suggestions"] if s["status"] in ("suggested", "blocked")]
+            if suggestion_ids is not None and chosen != set(suggestion_ids):
+                raise ValueError('A selected file is no longer eligible; refresh the preview')
+            self._clear_sort_selection(plan_id)
+            patches = [{"id": s["id"], "selected": True} for s in selected[:500]]
             self.update_sort_plan(plan_id, patches)
             return self.apply_sort_plan(plan_id, keep_pending=True)
+
+    def _clear_sort_selection(self, plan_id):
+        with self.store._connect() as db:
+            db.execute("UPDATE sort_suggestions SET selected=0 WHERE plan_id=? AND status IN ('suggested','blocked')", (plan_id,))
+
+    def apply_confident_sort(self, plan_id: str, *, confirm=False) -> dict:
+        """One approved automatic batch; ambiguous files remain pending."""
+        if confirm is not True:
+            raise ValueError('Automatic sorting requires confirm=true')
+        with self._gate:
+            plan = self._sort_plan(plan_id)
+            candidates = [s for s in plan['suggestions'] if automation_eligible(s)][:500]
+            if not candidates:
+                raise ValueError('No clear matches remain; review the uncertain files below')
+            return self.approve_sort_idea(plan_id, suggestion_ids=[s['id'] for s in candidates], confirm=True)
+
+    def keep_sort_files(self, plan_id: str, suggestion_ids, *, confirm=False) -> dict:
+        """Remember a keep decision until the indexed size/timestamp changes."""
+        if confirm is not True or not isinstance(suggestion_ids, list) or not 1 <= len(suggestion_ids) <= 500 or any(not isinstance(value, str) for value in suggestion_ids):
+            raise ValueError('Keeping files requires confirm=true and 1 to 500 suggestion IDs')
+        with self._gate:
+            plan = self._sort_plan(plan_id)
+            chosen = [s for s in plan['suggestions'] if s['id'] in suggestion_ids and s['status'] in ('suggested', 'blocked', 'failed')]
+            if {s['id'] for s in chosen} != set(suggestion_ids):
+                raise ValueError('A chosen file is no longer pending')
+            with self.store._connect() as db:
+                for suggestion in chosen:
+                    db.execute('UPDATE files SET sort_keep_size=size_bytes, sort_keep_modified=modified_at WHERE id=? AND root_id=? AND relative_path=?',
+                               (suggestion['file_id'], plan['root_id'], suggestion['source_relative']))
+                    db.execute("UPDATE sort_suggestions SET selected=0,status='dismissed',error=NULL WHERE id=?", (suggestion['id'],))
+            return self._sort_plan_view(self._sort_plan(plan_id))
 
     def _prepare_sort_directories(self, plan: dict, selected: list[dict], root_path: Path) -> list[str]:
         required: set[Path] = set()
@@ -579,7 +633,7 @@ class FileService:
                 self.store.update_sort_plan(plan_id, {"status": "expired"})
                 raise ValueError("Sort plan expired")
             root = self.store.get_root(plan["root_id"])
-            if not root or root["status"] != "ready":
+            if not root or root["status"] not in ("ready", "truncated"):
                 raise ValueError("Root is not ready for organization")
             selected = [s for s in plan["suggestions"] if s["selected"] and s["status"] == "suggested"]
             if not selected:
@@ -604,6 +658,10 @@ class FileService:
             failed = []
             for suggestion in selected:
                 try:
+                    with self.store._connect() as db:
+                        source = db.execute('SELECT root_id,relative_path FROM files WHERE id=?', (suggestion['file_id'],)).fetchone()
+                    if not source or source['root_id'] != plan['root_id'] or source['relative_path'] != suggestion['source_relative']:
+                        raise ValueError('The source moved since this preview; rescan before sorting')
                     action = self.action_manager.create_proposal(
                         suggestion["file_id"], "MOVE", suggestion["destination_relative"], plan["mode"]
                     )
@@ -638,7 +696,7 @@ class FileService:
             rolled_back = []
             failed = []
             for suggestion in reversed(plan["suggestions"]):
-                if suggestion["status"] != "applied" or not suggestion.get("action_id"):
+                if suggestion["status"] not in ("applied", "undo_failed") or not suggestion.get("action_id"):
                     continue
                 try:
                     result = self.action_manager.undo_action(suggestion["action_id"])

@@ -207,7 +207,7 @@ class FileActionManager:
             
         with self.store._connect() as db:
             root_row = db.execute("SELECT path, status FROM roots WHERE id=?", (action["root_id"],)).fetchone()
-            if not root_row or root_row["status"] not in ("ready", "pending", "error"):
+            if not root_row or root_row["status"] not in ("ready", "pending", "error", "truncated"):
                 raise ValueError("Root is invalid or being scanned")
                 
         # Demo simulation check
@@ -330,7 +330,7 @@ class FileActionManager:
             
         with self.store._connect() as db:
             root_row = db.execute("SELECT path, status FROM roots WHERE id=?", (action["root_id"],)).fetchone()
-            if not root_row or root_row["status"] not in ("ready", "pending", "error"):
+            if not root_row or root_row["status"] not in ("ready", "pending", "error", "truncated"):
                 raise ValueError("Root is invalid or being scanned")
                 
         if action["mode"] == "demo":

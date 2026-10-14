@@ -6,7 +6,7 @@ import json
 import threading
 from contextlib import closing
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 from kshetrajna.collector import Collector
 from kshetrajna.config import ConfigStore
@@ -41,6 +41,132 @@ class SortAiTests(unittest.TestCase):
 
     def test_ready_scan_clears_active_scan_gate(self):
         self.assertNotIn(self.root_id, self.service._active_scans)
+
+    def rescan_wait(self):
+        self.service.rescan_root(self.root_id)
+        deadline = time.monotonic() + 10
+        while self.store.get_root(self.root_id)['status'] == 'scanning':
+            self.assertLess(time.monotonic(), deadline, 'Scan never finished')
+            time.sleep(.01)
+
+    def test_auto_batch_sorts_common_downloads_and_leaves_uncertain_files(self):
+        payloads = {'beach.jpg': b'image', 'holiday.jpg': b'original image', 'recording.mp4': b'video',
+                    'archive.zip': b'archive', 'BrowserSetup.exe': b'installer',
+                    'holiday (1).jpg': b'possible duplicate', 'unknown.bin': b'unknown',
+                    'untitled.txt': b'valuable writing', 'pending.crdownload': b'partial'}
+        for name, data in payloads.items():
+            (self.root_path / name).write_bytes(data)
+        project = self.root_path / 'my-project'
+        project.mkdir()
+        (project / 'pyproject.toml').write_text('[project]\nname="my-project"')
+        (project / 'paper.pdf').write_bytes(b'project reference')
+        self.rescan_wait()
+        plan = self.service.generate_sort_plan(self.root_id, create_folders=True)
+        clear = {s['source_relative'] for s in plan['suggestions'] if s['automation_eligible']}
+        self.assertTrue({'beach.jpg', 'recording.mp4', 'archive.zip', 'BrowserSetup.exe'} <= clear)
+        self.assertFalse({'holiday (1).jpg', 'unknown.bin', 'untitled.txt', 'pending.crdownload'} & clear)
+        self.assertFalse(any(s['source_relative'].startswith('my-project/') for s in plan['suggestions']))
+        with self.assertRaisesRegex(ValueError, 'confirm=true'):
+            self.service.apply_confident_sort(plan['id'])
+        result = self.service.apply_confident_sort(plan['id'], confirm=True)
+        for directory, name in [('Pictures','beach.jpg'), ('Videos','recording.mp4'),
+                                ('Archives','archive.zip'), ('Installers','BrowserSetup.exe')]:
+            self.assertEqual((self.root_path / directory / name).read_bytes(), payloads[name])
+        for name in ('holiday (1).jpg', 'unknown.bin', 'untitled.txt', 'pending.crdownload'):
+            self.assertEqual((self.root_path / name).read_bytes(), payloads[name])
+        self.assertTrue((project / 'paper.pdf').exists())
+        self.assertEqual(self.service.undo_sort_plan(plan['id'])['status'], 'rolled_back')
+        for name, data in payloads.items():
+            self.assertEqual((self.root_path / name).read_bytes(), data)
+        self.assertFalse((self.root_path / 'Pictures').exists())
+
+    def test_exact_review_selection_does_not_move_other_files_in_same_folder(self):
+        (self.root_path / 'second.txt').write_text('second file')
+        self.rescan_wait()
+        plan = self.service.generate_sort_plan(self.root_id, create_folders=True)
+        selected = next(s for s in plan['suggestions'] if s['source_relative'] == 'notes.txt')
+        result = self.service.approve_sort_idea(plan['id'], suggestion_ids=[selected['id']], confirm=True)
+        self.assertEqual(len(result['applied']), 1)
+        self.assertTrue((self.root_path / 'second.txt').exists())
+        self.assertEqual(self.service.undo_sort_plan(plan['id'])['status'], 'rolled_back')
+
+    def test_keep_decision_persists_until_the_indexed_file_changes(self):
+        plan = self.service.generate_sort_plan(self.root_id, create_folders=True)
+        notes = next(s for s in plan['suggestions'] if s['source_relative'] == 'notes.txt')
+        with self.assertRaisesRegex(ValueError, 'confirm=true'):
+            self.service.keep_sort_files(plan['id'], [notes['id']])
+        self.service.keep_sort_files(plan['id'], [notes['id']], confirm=True)
+        self.rescan_wait()
+        plan = self.service.generate_sort_plan(self.root_id, create_folders=True)
+        self.assertNotIn('notes.txt', [s['source_relative'] for s in plan['suggestions']])
+        (self.root_path/'notes.txt').write_text('changed contents with a different size')
+        self.rescan_wait()
+        plan = self.service.generate_sort_plan(self.root_id, create_folders=True)
+        self.assertIn('notes.txt', [s['source_relative'] for s in plan['suggestions']])
+
+    def test_auto_batch_bounds_selection_and_excludes_review_items(self):
+        plan = self.service.generate_sort_plan(self.root_id, create_folders=True)
+        seed = plan['suggestions'][0]
+        virtual = {**plan, 'suggestions': [{**seed, 'id':str(index), 'source_relative':f'{index}.txt',
+                   'destination_relative':f'Documents/{index}.txt', 'review_required':index == 0}
+                   for index in range(503)]}
+        with patch.object(self.service, '_sort_plan', return_value=virtual), patch.object(
+                self.service, '_clear_sort_selection'), patch.object(self.service, 'update_sort_plan') as update, patch.object(
+                self.service, 'apply_sort_plan', return_value={'status':'partial'}):
+            self.service.apply_confident_sort(plan['id'], confirm=True)
+        selected = update.call_args.args[1]
+        self.assertEqual(len(selected), 500)
+        self.assertNotIn('0', [item['id'] for item in selected])
+
+    def test_truncated_scan_sorts_only_latest_indexed_subset(self):
+        for name in ('00.txt', '01.txt'):
+            (self.root_path / name).write_text('complete download')
+        self.rescan_wait()
+        with patch('kshetrajna.file_scanner.MAX_FILES', 2):
+            self.rescan_wait()
+        self.assertEqual(self.store.get_root(self.root_id)['status'], 'truncated')
+        plan = self.service.generate_sort_plan(self.root_id, create_folders=True)
+        self.assertTrue(plan['scan_partial'])
+        self.assertEqual({s['source_relative'] for s in plan['suggestions']}, {'00.txt', '01.txt'})
+        self.assertEqual(len(self.service.apply_confident_sort(plan['id'], confirm=True)['applied']), 2)
+        self.assertTrue((self.root_path / 'main.py').exists())
+        self.assertEqual(self.service.undo_sort_plan(plan['id'])['status'], 'rolled_back')
+
+    def test_worker_does_not_erase_immediately_requested_rescan(self):
+        if self.service._scan_thread:
+            self.service._scan_thread.join(timeout=5)
+        self.service._scan_thread = Mock(is_alive=Mock(return_value=True))
+        self.service._active_scans.add(self.root_id)
+        calls = []
+        def scan(root_id):
+            calls.append(root_id)
+            self.service._finish_scan(root_id)
+            if len(calls) == 1:
+                self.service.rescan_root(root_id)
+        with patch.object(self.service, '_run_scan', side_effect=scan):
+            self.service._scan_worker()
+        self.assertEqual(calls, [self.root_id, self.root_id])
+        self.assertIsNone(self.service._scan_thread)
+
+    def test_generated_folders_are_skipped_and_explained(self):
+        generated = self.root_path / 'node_modules'
+        generated.mkdir()
+        (generated / 'dependency.js').write_text('const x = 1')
+        self.rescan_wait()
+        self.assertFalse(any(s['relative_path'].startswith('node_modules/') for s in self.store.get_sortable_files(self.root_id)))
+        self.assertIn('protected/generated folders', self.store.get_root(self.root_id)['error'])
+
+    def test_renamed_source_is_not_retargeted_by_an_old_plan(self):
+        plan = self.service.generate_sort_plan(self.root_id, create_folders=True)
+        file = self.store.search_files('main.py')[0]
+        action = self.service.create_proposal(file['id'], 'RENAME', 'changed.py')
+        self.service.apply_action(action['proposal_id'])
+        result = self.service.apply_confident_sort(plan['id'], confirm=True)
+        failed = next(s for s in result['failed'] if 'source moved' in s['error'])
+        self.assertIsNotNone(failed)
+        self.assertTrue((self.root_path / 'changed.py').exists())
+        self.service.undo_sort_plan(plan['id'])
+        self.service.undo_action(action['id'])
 
     def test_preview_edit_apply_and_reverse_batch(self):
         plan = self.service.generate_sort_plan(self.root_id, create_folders=True)
@@ -152,10 +278,24 @@ class SortAiTests(unittest.TestCase):
             profile = Path(directory)
             (profile / "Downloads").mkdir()
             (profile / "Downloads" / "private.txt").write_text("not read", encoding="utf-8")
-            with patch.dict("os.environ", {"USERPROFILE": directory}, clear=False):
+            with patch.dict("os.environ", {"USERPROFILE": directory}, clear=True), patch(
+                    'kshetrajna.known_folders._windows_known_folders', return_value={}), patch(
+                    'os.scandir', side_effect=AssertionError('Discovery must not enumerate files')):
                 folders = discover_known_folders()
             self.assertEqual([(folder["id"], folder["path"]) for folder in folders],
                              [("downloads", str(profile / "Downloads"))])
+
+    def test_redirected_downloads_and_commercial_onedrive_are_discovered(self):
+        profile = Path(self.temp.name) / 'profile'
+        downloads = Path(self.temp.name) / 'Redirected Downloads'
+        cloud = Path(self.temp.name) / 'OneDrive - College'
+        downloads.mkdir()
+        (cloud / 'Desktop').mkdir(parents=True)
+        with patch.dict('os.environ', {'USERPROFILE':str(profile), 'OneDriveCommercial':str(cloud)}, clear=True), patch(
+                'kshetrajna.known_folders._windows_known_folders', return_value={'Downloads':str(downloads), 'Desktop':str(cloud/'Desktop')}):
+            folders = discover_known_folders()
+        self.assertIn({'id':'downloads', 'label':'Downloads', 'path':str(downloads)}, folders)
+        self.assertEqual(sum(f['path'] == str(cloud/'Desktop') for f in folders), 1)
 
 
 class SortAiHttpTests(unittest.TestCase):
@@ -209,6 +349,17 @@ class SortAiHttpTests(unittest.TestCase):
         self.assertEqual(detail["id"], plan["id"])
         status, _ = self.call("POST", "/api/files/sort/update", {"plan_id": plan["id"], "suggestions": "bad"})
         self.assertEqual(status, 400)
+
+    def test_auto_endpoint_requires_confirmation_and_preserves_undo(self):
+        _, plan = self.call('POST', '/api/files/sort/preview', {'root_id':self.root_id, 'create_folders':True})
+        status, _ = self.call('POST', '/api/files/sort/auto', {'plan_id':plan['id']})
+        self.assertEqual(status, 400)
+        status, result = self.call('POST', '/api/files/sort/auto', {'plan_id':plan['id'], 'confirm':True})
+        self.assertEqual(status, 200)
+        self.assertEqual(len(result['applied']), 1)
+        status, result = self.call('POST', '/api/files/sort/undo', {'plan_id':plan['id']})
+        self.assertEqual(status, 200)
+        self.assertEqual(result['status'], 'rolled_back')
 
     def test_root_add_requires_explicit_consent(self):
         status, body = self.call("POST", "/api/files/roots/add", {"path": "C:\\Users\\Demo\\Desktop", "label": "Desktop"})

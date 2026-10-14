@@ -319,10 +319,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
             elif path == "/api/files/sort/apply" and self.server.file_service:
                 result = self.server.file_service.apply_sort_plan(body.get("plan_id"))
                 self._json(200 if result.get("status") in ("applied", "partial") else 409, result)
+            elif path == '/api/files/sort/auto' and self.server.file_service:
+                result = self.server.file_service.apply_confident_sort(body.get('plan_id'), confirm=body.get('confirm'))
+                self._json(200 if result.get('status') in ('applied', 'partial') else 409, result)
+            elif path == '/api/files/sort/keep' and self.server.file_service:
+                self._json(200, self.server.file_service.keep_sort_files(body.get('plan_id'), body.get('suggestion_ids'), confirm=body.get('confirm')))
             elif path == "/api/files/sort/approve-idea" and self.server.file_service:
                 result = self.server.file_service.approve_sort_idea(
                     body.get("plan_id"), folder=body.get("folder"),
-                    suggestion_id=body.get("suggestion_id"), confirm=body.get("confirm"))
+                    suggestion_id=body.get("suggestion_id"), suggestion_ids=body.get('suggestion_ids'), confirm=body.get("confirm"))
                 self._json(200 if result.get("status") in ("applied", "partial") else 409, result)
             elif path == "/api/files/sort/undo" and self.server.file_service:
                 result = self.server.file_service.undo_sort_plan(body.get("plan_id"))

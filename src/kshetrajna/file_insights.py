@@ -18,7 +18,16 @@ CODE_EXTENSIONS = frozenset({
     "kts", "sql", "sh", "bash", "ps1", "bat",
 })
 DATA_EXTENSIONS = frozenset({"csv", "tsv", "xlsx", "sqlite", "db", "json", "yaml", "yml", "toml"})
-MEDIA_EXTENSIONS = frozenset({"jpg", "jpeg", "png", "svg", "gif", "webp", "mp4", "mov", "avi", "mkv", "wav", "mp3"})
+MEDIA_EXTENSIONS = frozenset({'jpg','jpeg','png','svg','gif','webp','bmp','heic','tif','tiff','mp4','mov','avi','mkv','webm','wmv','m4v','wav','mp3','flac','aac','m4a','ogg','opus'})
+DOWNLOAD_FOLDERS = {
+    **dict.fromkeys(('jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'tif', 'tiff', 'svg'), 'Pictures'),
+    **dict.fromkeys(('mp4', 'mkv', 'mov', 'avi', 'webm', 'wmv', 'm4v'), 'Videos'),
+    **dict.fromkeys(('mp3', 'wav', 'flac', 'aac', 'm4a', 'ogg', 'opus'), 'Audio'),
+    **dict.fromkeys(('zip', '7z', 'rar', 'tar', 'gz', 'bz2', 'xz'), 'Archives'),
+    **dict.fromkeys(('ppt', 'pptx', 'odp'), 'Presentations'),
+    **dict.fromkeys(('xls', 'xlsx', 'ods'), 'Data/Spreadsheets'),
+    **dict.fromkeys(('doc', 'docx', 'odt', 'rtf', 'pdf', 'epub'), 'Documents'),
+}
 OFFICE_EXTENSIONS = frozenset({"docx", "pptx", "xlsx"})
 PDF_EXTENSIONS = frozenset({"pdf"})
 GENERATED_EXTENSIONS = frozenset({"exe", "dll", "msi", "pyc", "class", "obj", "o", "so", "bin", "tmp", "bak"})
@@ -67,6 +76,8 @@ def _profile(name: str, ext: str, text: str, size: int | None) -> dict:
     if ext in MEDIA_EXTENSIONS:
         category, kind = "Media", "media"
         summary = "Media file; visual/audio meaning has not been inferred from its name."
+    elif ext in {'zip', '7z', 'rar', 'tar', 'gz', 'bz2', 'xz'}:
+        kind, summary = 'archive', 'Archive format inferred from the extension; contents were not extracted.'
     elif ext in GENERATED_EXTENSIONS:
         category, kind = "Code", "binary"
         summary = "Binary, compiled output, installer, or backup; its purpose needs path/source context."
@@ -197,13 +208,23 @@ def generate_insights(file_name: str, extension: str, relative_path: str, excerp
         folder = str(path.parent) if str(path.parent) != '.' else ""
         reason = f"Keep this file in {project}; its project context is stronger evidence than a generic category folder."
         evidence.append(f"Project context: {project}.")
-    elif len(path.parts) > 1 and profile["suggested_category"] in {"Code", "Data"} and action == "organize":
+    elif len(path.parts) > 1 and (profile['suggested_category'] in {'Code', 'Data'} or profile['content_kind'] == 'archive') and action == "organize":
         action, folder = "keep", str(path.parent)
         reason = "Keep this file in its existing collection/project rather than separating it from related files."
 
     if profile["content_kind"] == "log" and not audit_terms:
         purpose, action, folder = "Diagnostic log", "archive", "Archive/Logs"
         reason = "Archive this log rather than delete it; it may still explain a failure."
+    # Loose downloads can be grouped by a clear format even when their value
+    # or subject cannot be inferred. Preserve existing collections/projects.
+    if len(path.parts) == 1 and not project and not paired and action not in {'cleanup', 'archive'}:
+        format_folder = DOWNLOAD_FOLDERS.get(ext)
+        if ext in ('exe', 'msi', 'msix') and any(word in file_name.casefold() for word in ('setup', 'install')):
+            format_folder = 'Installers'
+        if format_folder and (not topic or profile['content_kind'] == 'media') and profile['content_kind'] != 'empty':
+            folder, action, confidence = format_folder, 'organize', 'high'
+            reason = f'Group this loose {ext.upper()} download in {folder}; preserve its contents.'
+            evidence.append(f'Clear format destination: {folder}; file extension is {ext}.')
     # A marker is evidence of unfinished work only when it is a standalone
     # note/comment, not an HTML placeholder attribute or JSON report field.
     markers = re.findall(r"(?im)^\s*(?:#|//|/\*|\*|-)?\s*(TODO|FIXME)\s*[:\-]\s*([^\n]{1,100})", text)
@@ -238,8 +259,10 @@ def generate_insights(file_name: str, extension: str, relative_path: str, excerp
         if destination.casefold() == relative.casefold():
             action, reason = "keep", "Already in the suggested purpose-specific folder."
     summary = f"{purpose}" + (f" · {topic}" if topic and topic.casefold() not in purpose.casefold() else '')
+    ambiguous_topics = len([subject for subject, terms in SUBJECTS if _matches(labels + ' ' + content_signals, terms)]) > 1
     requires_review = (action in {"cleanup", "review", "rename", "archive"}
-                       or duplicate_suffix or profile["content_kind"] == "binary")
+                       or duplicate_suffix or bool(duplicate_peers) or ambiguous_topics
+                       or (profile["content_kind"] == "binary" and folder != 'Installers'))
     action_label = {
         "keep": "Keep with its related project/files",
         "organize": f"Organize into {folder}",
@@ -261,6 +284,10 @@ def generate_insights(file_name: str, extension: str, relative_path: str, excerp
         "review_reason": (
             "Review this numbered copy before deleting it; matching contents were not verified."
             if duplicate_suffix else
+            'Similarly named files may be duplicates; complete contents have not been compared.'
+            if duplicate_peers else
+            'Several subjects match this preview; choose the intended subject before moving it.'
+            if ambiguous_topics else
             "Review this binary/generated-looking file before deleting it; it may still be needed."
             if profile["content_kind"] == "binary" and action != "cleanup" else
             "Review this generic placeholder filename; keep the content if it has a real purpose."

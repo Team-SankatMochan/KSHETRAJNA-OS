@@ -106,15 +106,17 @@
 
       <section class="panel sort-panel" id="sort-ai">
         <div class="panel-head"><div><p class="eyebrow">SORT AI / REVIEWED ORGANIZER</p><h2>Organize approved files</h2></div><span class="quiet" id="sort-status">REVIEWED IDEAS</span></div>
-        <p class="control-note">Kshetrajna explains each organization idea in plain language. It never moves or deletes anything until you approve that specific folder or file action.</p>
+        <p class="control-note">Auto-sort groups clear loose-file matches in one approved batch. Ambiguous files, numbered copies, and conflicts stay here for your advice. Existing collections and projects stay together. Every move is logged and supports eligible undo; sorting never deletes files.</p>
         <div class="sort-toolbar">
           <label class="input-label">Approved folder<select id="sort-root"><option value="">Add and scan a folder first</option></select></label>
-          <div class="sort-folder-note"><strong>Nothing happens automatically</strong><small>Folder creation and file moves each need your approval.</small></div>
-          <button type="button" id="sort-generate" class="primary" disabled>Show organization ideas</button>
+          <div class="sort-folder-note"><strong>Clear matches together · exceptions separately</strong><small>Approve the batch once; review only files needing a decision.</small></div>
+          <div class="control-actions"><button type="button" id="sort-generate" class="secondary" disabled>Preview sort</button>
+          <button type="button" id="sort-auto" class="primary" disabled>Auto-sort clear matches</button></div>
         </div>
         <div id="sort-plan-meta" class="sort-plan-meta"></div>
         <div id="sort-suggestions" class="sort-suggestions"><p class="empty">Choose a ready approved folder to hear organization ideas.</p></div>
         <div id="sort-actions" class="control-actions"></div>
+        <label class="input-label">Recent sort batches<select id="sort-history"><option value="">No completed batches yet</option></select></label>
         <p class="feedback" id="sort-feedback" role="status"></p>
       </section>
       
@@ -136,7 +138,7 @@
           <div id="file-action-journal" class="decision-journal"></div>
         </article>
       </section>
-      <footer><span>KSHETRAJNA / HACKATHON PROTOTYPE v0.4</span><span>LOCAL INTELLIGENCE · EXPLICIT CONSENT · AUDITABLE ACTIONS</span></footer>
+      <footer><span>KSHETRAJNA / HACKATHON PROTOTYPE v0.4.1</span><span>LOCAL INTELLIGENCE · EXPLICIT CONSENT · AUDITABLE ACTIONS</span></footer>
     </main>
   </div>
   <dialog id="approval-dialog"><p class="eyebrow">REVIEW BEFORE APPROVAL</p><h2 id="approval-title"></h2><p id="approval-reason"></p><div id="approval-effect" class="approval-effect"></div><p id="approval-mode" class="control-note"></p><p class="control-note">Undo is available in the journal. A live trial restores this PID only; newly spawned child processes may inherit its priority. If the app crashes, restart it to attempt recovery.</p><div class="control-actions"><button id="confirm-trial" class="primary">Approve 60-second trial</button><button id="cancel-trial" class="secondary">Cancel</button></div></dialog>
@@ -145,6 +147,7 @@
    <dialog id="file-review-dialog" class="file-review-dialog"><p class="eyebrow">FILE PREVIEW</p><h2 id="file-review-title"></h2><code id="file-review-path"></code><p id="file-review-summary" class="approval-effect"></p><p id="file-review-reason" class="sort-warning"></p><div id="file-review-image-panel" class="file-review-image-panel" hidden><p id="file-review-image-status" role="status"></p><div id="file-review-image-stage" class="file-review-image-stage"><img id="file-review-image" alt="" hidden></div><button id="file-review-image-zoom" type="button" class="secondary" disabled>View at actual size</button></div><div id="file-review-pdf-panel" class="file-review-pdf-panel" hidden><p id="file-review-pdf-status" role="status"></p><iframe id="file-review-pdf" title="PDF document preview" sandbox="allow-same-origin"></iframe></div><pre id="file-review-excerpt" class="file-review-excerpt"></pre><p id="file-review-metadata" class="control-note"></p><div class="control-actions"><button id="file-review-close" class="primary">Close preview and choose action</button></div></dialog>
    <dialog id="file-review-action-dialog"><p class="eyebrow">AUTOMATIC DECISION</p><h2>Recommended next step</h2><p id="file-review-action-copy"></p><p class="control-note">Kshetrajna chooses from content, filename, path, related files, and file type. You can use its recommendation or choose a different action. Delete is permanent and requires one more confirmation.</p><div class="control-actions"><button id="file-review-auto" class="primary">Use automatic recommendation</button><button id="file-review-keep" class="secondary">Keep it for now</button><button id="file-review-move" class="secondary">Move it somewhere</button><button id="file-review-delete" class="danger">Delete permanently</button></div></dialog>
   <dialog id="chat-action-dialog"><p class="eyebrow">REVIEW BEFORE APPROVAL</p><h2 id="chat-action-title"></h2><p id="chat-action-effect"></p><p id="chat-action-undo" class="approval-effect"></p><div id="chat-action-candidates" class="maintenance-candidates" hidden></div><label id="chat-action-name-row" class="input-label" hidden>Type the exact app name to confirm force termination<input id="chat-action-name" autocomplete="off" maxlength="150"></label><p id="chat-action-mode" class="control-note"></p><p id="chat-action-error" class="feedback" role="alert"></p><div class="control-actions"><button type="button" id="chat-action-confirm" class="primary">Approve this action</button><button type="button" id="chat-action-cancel" class="secondary">Cancel</button></div></dialog>
+  <dialog id="sort-confirm-dialog" aria-labelledby="sort-confirm-title"><p class="eyebrow">SORT AI / ONE BATCH APPROVAL</p><h2 id="sort-confirm-title"></h2><p id="sort-confirm-copy" style="white-space: pre-line"></p><div class="control-actions"><button id="sort-confirm-approve" type="button" class="primary">Approve</button><button id="sort-confirm-cancel" type="button" class="secondary">Cancel</button></div></dialog>
   <div id="toast" role="status" hidden></div>
 </body>
 </html>

@@ -138,6 +138,9 @@ class FileStore:
             file_columns = {row[1] for row in db.execute("PRAGMA table_info(files)")}
             if "inspection_version" not in file_columns:
                 db.execute("ALTER TABLE files ADD COLUMN inspection_version INTEGER NOT NULL DEFAULT 0")
+            for column, definition in {'sort_keep_size':'INTEGER', 'sort_keep_modified':'TEXT'}.items():
+                if column not in file_columns:
+                    db.execute(f'ALTER TABLE files ADD COLUMN {column} {definition}')
 
     @contextmanager
     def _connect(self):
@@ -288,7 +291,8 @@ class FileStore:
             rows = db.execute(
                 "SELECT id, root_id, relative_path, name, extension, size_bytes, modified_at, "
                 "created_at, is_directory, mime_guess, excerpt FROM files "
-                "WHERE root_id=? AND is_directory=0 ORDER BY relative_path COLLATE NOCASE",
+                "WHERE root_id=? AND is_directory=0 AND (sort_keep_size IS NULL OR sort_keep_size!=size_bytes OR sort_keep_modified IS NOT modified_at) "
+                "AND ((SELECT status FROM roots WHERE id=files.root_id)!='truncated' OR scan_pass=(SELECT last_pass FROM scan_state WHERE root_id=files.root_id)) ORDER BY relative_path COLLATE NOCASE",
                 (root_id,),
             ).fetchall()
             return [dict(row) for row in rows]

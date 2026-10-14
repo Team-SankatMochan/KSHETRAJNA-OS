@@ -1,4 +1,13 @@
 /* File Intelligence Styles */
+.sort-auto-summary {
+  padding: 1rem;
+  border: 1px solid #52745a;
+  border-radius: 8px;
+  background: #111b15;
+  margin-bottom: 1rem;
+}
+.sort-auto-summary summary { cursor: pointer; font-weight: 600; }
+.sort-auto-summary small { display: block; overflow-wrap: anywhere; }
 
 #files {
   margin-top: 2rem;

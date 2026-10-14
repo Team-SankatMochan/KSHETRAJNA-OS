@@ -2,7 +2,11 @@
 
 > **The intelligence that knows the field.**
 
-A local Windows workload and file assistant that observes app activity, indexes local files, recognizes workflows, explains resource recommendations, asks for consent, and records outcomes and rollback. This is the end-to-end hackathon prototype, version 0.4.
+A local Windows workload and file assistant that observes app activity, indexes local files, recognizes workflows, explains resource recommendations, asks for consent, and records outcomes and rollback. This is the end-to-end hackathon prototype, version 0.4.1.
+
+**Sort AI update:** Automatic batches handle clear loose-file matches, with a
+separate advice queue and remembered keep decisions. Downloads discovery uses
+Windows' actual folder location. See [Sort AI setup and behavior](docs/SORT_AI.md).
 
 **Public Windows beta:** Source tests and packaged-app checks passed on native
 Windows x64 and ARM64. System modifications remain experimental and individually

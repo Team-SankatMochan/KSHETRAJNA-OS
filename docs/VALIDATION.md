@@ -1,5 +1,24 @@
 # Validation record
 
+## Update: 14 October 2026 — Sort AI 0.4.1
+
+- Local Windows x64 full suite: 138 tests passed in 112.679 seconds before
+  adding the batch-limit regression. The final Sort AI group passed 25 tests
+  in 10.277 seconds; the file-insights group passed 16 tests after preserving
+  subject evidence. The final source suite contains 139 tests.
+- Regression fixtures cover common-download batch moves, uncertain/duplicate
+  retention, project preservation, exact review selection, persistent keep
+  decisions, changed-source rejection, latest-pass partial scans, queued rescan
+  races, redirected Downloads/OneDrive discovery, batch bounds and HTTP approval.
+- Windows known-folder discovery was checked read-only on this x64 machine.
+  Its actual Downloads and redirected Desktop/Documents locations were found.
+- An isolated live browser fixture scanned seven files, sorted three clear
+  matches while retaining four ambiguous files, and restored the three moves.
+  The final in-app approval/history controls were exercised; two keep decisions
+  reduced the advice queue from four to two. No personal files were sorted.
+- Browser syntax and repository whitespace checks passed. New native package
+  qualification is required before publishing 0.4.1 bundles.
+
 ## Update: 14 October 2026 — self-contained distribution
 
 - Windows x64 source suite: **129 tests passed** in 46.369 seconds.

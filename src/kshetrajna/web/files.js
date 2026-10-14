@@ -2,6 +2,28 @@
 
 let currentFilesState = null;
 let currentSortPlan = null;
+let filesRefreshing = false;
+let sortBusy = false;
+let filesRevision = 0;
+let sortRenderSignature = '';
+let pendingSortApproval = null;
+
+function finishSortApproval(approved) {
+  const pending = pendingSortApproval;
+  pendingSortApproval = null;
+  if ($('sort-confirm-dialog').open) $('sort-confirm-dialog').close();
+  if (pending) pending(approved);
+}
+
+function requestSortApproval(title, message) {
+  const dialog = $('sort-confirm-dialog');
+  if (!dialog?.showModal) return Promise.resolve(window.confirm(message));
+  if (pendingSortApproval) finishSortApproval(false);
+  $('sort-confirm-title').textContent = title;
+  $('sort-confirm-copy').textContent = message;
+  dialog.showModal();
+  return new Promise(resolve => {pendingSortApproval = resolve;});
+}
 let pendingRootApproval = null;
 let pendingFileReview = null;
 let filePreviewRequest = 0;
@@ -60,22 +82,28 @@ function sortGroups(plan) {
 }
 
 async function refreshFiles() {
+  if (filesRefreshing || sortBusy || appStopped) return;
+  filesRefreshing = true;
+  const revision = filesRevision;
   try {
-    const state = await request('/api/files/state');
+    const [state, knownFolders, insights, actions] = await Promise.all([
+      request('/api/files/state'), request('/api/files/known-folders'),
+      request('/api/files/insights'), request('/api/files/actions'),
+    ]);
+    if (sortBusy || revision !== filesRevision) return;
     renderFiles(state);
-    const knownFolders = await request('/api/files/known-folders');
     renderKnownFolders(knownFolders.folders || [], state.roots || []);
-    const insights = await request('/api/files/insights');
     renderInsights(insights);
-    const actions = await request('/api/files/actions');
     renderActionJournal(actions.actions || []);
     const summaries = state.sort_plans || [];
     const summary = currentSortPlan
       ? summaries.find(plan => plan.id === currentSortPlan.id)
-      : summaries.find(plan => ['preview', 'partial', 'applied', 'undo_partial'].includes(plan.status));
+      : summaries.find(plan => plan.root_id === Number($('sort-root').value) && ['preview', 'partial', 'applied', 'undo_partial'].includes(plan.status));
     if (summary) {
       try {
-        currentSortPlan = await request('/api/files/sort/plan/' + encodeURIComponent(summary.id));
+        const plan = await request('/api/files/sort/plan/' + encodeURIComponent(summary.id));
+        if (sortBusy || revision !== filesRevision) return;
+        currentSortPlan = plan;
       } catch (error) {
         currentSortPlan = null;
       }
@@ -84,7 +112,9 @@ async function refreshFiles() {
     }
     renderSortPlan(currentSortPlan);
   } catch (error) {
-    console.error("Failed to fetch file state:", error);
+    $('file-feedback').textContent = `Could not refresh files: ${error.message}. Check that the local app is running.`;
+  } finally {
+    filesRefreshing = false;
   }
 }
 
@@ -95,18 +125,23 @@ function renderKnownFolders(folders, roots) {
     container.append(element('p', 'No conventional user folders were found. You can enter an approved path below.', 'empty'));
     return;
   }
-  const approved = new Set(roots.map(root => root.path.toLowerCase()));
   for (const folder of folders) {
+    const normalize = path => path.replace(/[\\/]+$/, '').replaceAll('\\', '/').toLowerCase();
+    const match = roots.find(root => normalize(root.path) === normalize(folder.path));
+    const covered = roots.find(root => normalize(folder.path).startsWith(normalize(root.path) + '/'));
     const row = element('div', null, 'known-folder');
     const details = element('div');
     details.append(element('strong', folder.label), element('small', folder.path, 'root-path'));
-    const action = button(approved.has(folder.path.toLowerCase()) ? 'Approved' : 'Approve and scan', async () => {
-      if (approved.has(folder.path.toLowerCase())) return;
+    const action = button(covered ? 'Covered by approved folder' : match ? 'Rescan folder' : 'Approve and scan', async () => {
+      if (match) {
+        await mutateFile('/api/files/roots/rescan', {root_id: match.id}, `${folder.label} rescan started.`);
+        return;
+      }
       if (await requestRootApproval(folder.path, folder.label)) {
         await mutateFile('/api/files/roots/add', { path: folder.path, label: folder.label, consent: true }, `${folder.label} approved and scan started.`);
       }
-    }, approved.has(folder.path.toLowerCase()) ? 'text-button' : 'secondary');
-    action.disabled = approved.has(folder.path.toLowerCase());
+    }, 'secondary');
+    action.disabled = Boolean(covered || match?.status === 'scanning');
     row.append(details, action);
     container.append(row);
   }
@@ -131,10 +166,13 @@ function renderFiles(state) {
       const status = element('span', root.status.toUpperCase(), 'root-status ' + root.status);
       label.append(status);
       
-      const stats = element('small', `${root.file_count} files · ${bytes(root.total_bytes)}`, 'quiet');
+      const stats = element('small', root.status === 'scanning' ? `Scanning… ${root.scan?.files_seen || 0} files indexed so far` : `${root.file_count} files · ${bytes(root.total_bytes)}`, 'quiet');
       const path = element('span', root.path, 'root-path');
       
       info.append(label, path, stats);
+      if (root.error) info.append(element('small', root.error, 'sort-warning'));
+      if (root.status === 'truncated') info.append(element('small', 'Scan limit reached. You can sort the indexed subset or approve a smaller folder.', 'sort-warning'));
+      if (root.status === 'ready' && !root.file_count) info.append(element('small', 'No indexable files found. Cloud-only files and links are skipped; make cloud files available offline before rescanning.', 'quiet'));
       item.append(info);
       
       const actions = element('div', null, 'control-actions');
@@ -152,20 +190,38 @@ function renderFiles(state) {
 
   const sortRoot = $('sort-root');
   const previousRoot = sortRoot.value;
-  sortRoot.replaceChildren();
-  const readyRoots = state.roots.filter(root => root.status === 'ready');
-  if (!readyRoots.length) {
-    sortRoot.append(new Option('Add and scan a folder first', ''));
-  } else {
-    for (const root of readyRoots) {
-      sortRoot.append(new Option(`${root.label || 'Approved folder'} · ${root.path}`, String(root.id)));
+  const readyRoots = state.roots.filter(root => ['ready', 'truncated'].includes(root.status));
+  const options = readyRoots.length ? readyRoots.map(root => [`${root.label || 'Approved folder'} · ${root.path}`, String(root.id)]) : [['Add and scan a folder first', '']];
+  const optionSignature = JSON.stringify(options);
+  if (sortRoot.dataset.options !== optionSignature) {
+    sortRoot.replaceChildren();
+    for (const [label, value] of options) {
+      sortRoot.append(new Option(label, value));
     }
-    sortRoot.value = readyRoots.some(root => String(root.id) === previousRoot) ? previousRoot : String(readyRoots[0].id);
+    sortRoot.dataset.options = optionSignature;
+    sortRoot.value = readyRoots.some(root => String(root.id) === previousRoot) ? previousRoot : readyRoots.length ? String(readyRoots[0].id) : '';
   }
-  $('sort-generate').disabled = !readyRoots.length;
+  $('sort-generate').disabled = !readyRoots.length || sortBusy;
+  $('sort-auto').disabled = !readyRoots.length || sortBusy;
+  const history = $('sort-history');
+  const batches = (state.sort_plans || []).filter(plan => ['applied','partial','undo_partial','rolled_back'].includes(plan.status));
+  const choices = [['Recent batches: select to inspect or undo', ''], ...batches.map(plan => {
+    const root = state.roots.find(root => root.id === plan.root_id);
+    return [`${root?.label || 'Approved folder'} / ${timeLabel(plan.created_at)} / ${plan.status.replaceAll('_',' ')}`, plan.id];
+  })];
+  const historySignature = JSON.stringify(choices);
+  if (history.dataset.options !== historySignature) {
+    const selected = history.value;
+    history.replaceChildren(...choices.map(([label, value]) => new Option(label, value)));
+    history.dataset.options = historySignature;
+    history.value = batches.some(plan => plan.id === selected) ? selected : '';
+  }
 }
 
 function renderSortPlan(plan) {
+  const signature = JSON.stringify([plan, $('sort-root').value, currentFilesState?.mode]);
+  if (signature === sortRenderSignature) return;
+  sortRenderSignature = signature;
   const meta = $('sort-plan-meta');
   const list = $('sort-suggestions');
   const actions = $('sort-actions');
@@ -179,28 +235,40 @@ function renderSortPlan(plan) {
     return;
   }
   status.textContent = `${plan.mode === 'demo' ? 'SIMULATION / ' : ''}${plan.status.replaceAll('_', ' ').toUpperCase()}`;
-  const groups = sortGroups(plan);
-  const selectedCount = plan.suggestions.filter(s => s.selected && s.status === 'suggested').length;
-  const blockedCount = plan.suggestions.filter(s => s.status === 'blocked').length;
+  const automatic = plan.suggestions.filter(s => s.automation_eligible);
+  const needsReview = plan.suggestions.filter(s => !s.automation_eligible && ['suggested', 'blocked', 'failed', 'undo_failed'].includes(s.status));
+  const completed = plan.suggestions.filter(s => ['applied', 'rolled_back'].includes(s.status));
+  const groups = sortGroups({...plan, suggestions: needsReview.slice(0, 100)});
   meta.append(
-    element('strong', `${groups.length} organization ideas · ${selectedCount} files ready · ${blockedCount} need review`),
-    element('small', `Review each idea before approving. Preview expires ${timeLabel(plan.expires_at)}.`, 'quiet'),
+    element('strong', `${automatic.length} clear matches · ${needsReview.length} need your advice · ${completed.filter(s => s.status === 'applied').length} moved`),
+    element('small', `Auto-sort moves up to ${plan.batch_limit || 500} clear matches per batch. Preview expires ${timeLabel(plan.expires_at)}.`, 'quiet'),
   );
+  if (plan.scan_partial) meta.append(element('small', 'Partial scan: only the files indexed in the latest pass are considered.', 'sort-warning'));
+  if (plan.error) meta.append(element('p', plan.error, 'sort-warning'));
+  if (automatic.length) {
+    const details = document.createElement('details');
+    details.className = 'sort-auto-summary';
+    details.append(element('summary', `Clear matches: inspect destinations (${automatic.length})`));
+    for (const group of sortGroups({...plan, suggestions: automatic})) {
+      details.append(element('p', `${group.folder}: ${group.items.length} files`));
+      details.append(element('small', group.items.slice(0, 10).map(s => s.source_relative).join(', ') + (group.items.length > 10 ? '…' : ''), 'quiet'));
+    }
+    list.append(details);
+  }
+  if (!needsReview.length && plan.suggestions.length) list.append(element('p', automatic.length ? 'No ambiguous files need your advice. Use Auto-sort clear matches to move this batch.' : 'No pending sorting decisions. Kept files stay where they are; undo is available for eligible moves.', 'empty'));
+  if (needsReview.length > 100) list.append(element('p', 'Showing the first 100 review items. Remaining items stay untouched.', 'quiet'));
   if (!plan.suggestions.length) {
     list.append(element('p', 'I did not find a safe organization idea in this indexed folder.', 'empty'));
   }
-  const root = sortRoot();
+  const root = {path: plan.root_path, label: plan.root_label};
   for (const group of groups) {
     const movable = group.items.filter(suggestion => suggestion.status === 'suggested');
     const blocked = group.items.filter(suggestion => suggestion.status === 'blocked');
-    const folderExists = group.items.every(suggestion => suggestion.destination_folder_exists);
     const card = element('article', null, `sort-conversation${blocked.length && !movable.length ? ' blocked' : ''}`);
     const noun = group.items.length === 1 ? 'this file' : 'these files';
     const location = root ? sortLocation(root) : 'the approved folder';
     const destination = root ? sortFolderPath(root, group.folder) : group.folder;
-    const sentence = folderExists
-      ? `I feel ${noun} belongs in the existing folder named ${group.folder} on ${location}. Should I move ${group.items.length === 1 ? 'it' : 'them'} there?`
-      : `I feel ${noun} belong in one folder. Should I create a folder named ${group.folder} on ${location} and move ${group.items.length === 1 ? 'it' : 'them'} there?`;
+    const sentence = group.folder ? `Needs your advice: ${noun}. Suggested folder: ${group.folder}.` : `Needs your advice: ${noun}. Keep here or choose a destination in Preview & decide.`;
     card.append(element('p', sentence), element('code', destination));
     const summaries = [...new Set(group.items.map(suggestion => suggestion.content_summary).filter(Boolean))];
     if (summaries.length) {
@@ -235,77 +303,136 @@ function renderSortPlan(plan) {
       card.append(element('small', blocked.map(suggestion => suggestion.error || 'This file needs review.').join(' '), 'sort-warning'));
     }
     if (movable.length && ['preview', 'partial'].includes(plan.status)) {
-      const actionLabel = folderExists ? `Yes, move ${movable.length === 1 ? 'this file' : 'these files'}` : `Yes, create folder and move ${movable.length === 1 ? 'this file' : 'these files'}`;
+      const actionLabel = `Move ${movable.length === 1 ? 'this reviewed file' : 'these reviewed files'}`;
       card.append(button(actionLabel, () => applySortPlan(movable.map(suggestion => suggestion.id)), 'primary'));
     }
+    const pending = group.items.filter(s => ['suggested', 'blocked', 'failed'].includes(s.status));
+    if (pending.length) card.append(button(pending.length === 1 ? 'Keep this here' : 'Keep these here', () => keepSortFiles(pending.map(s => s.id)), 'secondary'));
     list.append(card);
   }
-  const editable = ['preview', 'partial'].includes(plan.status);
   if (['applied', 'partial', 'undo_partial'].includes(plan.status)) {
     actions.append(button('Undo eligible changes', undoSortPlan, 'secondary'));
   }
 }
 
 async function generateSortPlan() {
+  if (sortBusy) return;
   const rootId = Number($('sort-root').value);
   if (!Number.isInteger(rootId) || rootId <= 0) return;
+  sortBusy = true;
+  filesRevision += 1;
+  currentSortPlan = null;
   $('sort-generate').disabled = true;
+  $('sort-auto').disabled = true;
   try {
     currentSortPlan = await post('/api/files/sort/preview', {
       root_id: rootId,
       create_folders: true,
     });
     renderSortPlan(currentSortPlan);
-    $('sort-feedback').textContent = 'Organization ideas are ready. Review each question before approving a move.';
+    $('sort-feedback').textContent = `${currentSortPlan.automatic_count} clear matches can be sorted together; ${currentSortPlan.review_count} files need your advice.`;
+    $('sort-feedback').style.color = '';
   } catch (error) {
     $('sort-feedback').textContent = error.message;
     $('sort-feedback').style.color = '#f0aaa0';
   } finally {
+    sortBusy = false;
     $('sort-generate').disabled = false;
+    $('sort-auto').disabled = false;
+  }
+}
+
+async function autoSortClearMatches() {
+  if (sortBusy) return;
+  const root = sortRoot();
+  if (!root) { $('sort-feedback').textContent = 'Approve and scan a folder in File Intelligence first.'; return; }
+  // Always generate a fresh preview for the selected root before approval.
+  await generateSortPlan();
+  if (!currentSortPlan || currentSortPlan.root_id !== root.id) return;
+  const count = Math.min(currentSortPlan.automatic_count || 0, currentSortPlan.batch_limit || 500);
+  if (!count) { $('sort-feedback').textContent = 'No clear matches remain. The files below need your advice or are already organized.'; return; }
+  const destinations = sortGroups({...currentSortPlan, suggestions:currentSortPlan.suggestions.filter(s => s.automation_eligible).slice(0,count)}).map(group => `${group.folder}: ${group.items.length} files`).join('\n');
+  if (!await requestSortApproval(`Auto-sort ${count} clear matches?`, `${root.path}\n\n${destinations}\n\nOnly loose files with clear destinations move. Folders are created as needed. Ambiguous files stay untouched; nothing is deleted. Eligible moves can be undone.`)) return;
+  sortBusy = true;
+  $('sort-auto').disabled = true;
+  $('sort-generate').disabled = true;
+  try {
+    const result = await post('/api/files/sort/auto', {plan_id: currentSortPlan.id, confirm: true});
+    currentSortPlan = result.plan;
+    renderSortPlan(currentSortPlan);
+    $('sort-feedback').textContent = `Sorted ${result.applied.length} files. ${result.failed.length} could not move; ${result.plan.review_count} need your advice. Undo is available.`;
+    $('sort-feedback').style.color = result.failed.length ? '#f0aaa0' : '';
+  } catch (error) {
+    $('sort-feedback').textContent = `Sorting could not finish: ${error.message}`;
+  } finally {
+    sortBusy = false;
+    await refreshFiles();
   }
 }
 
 async function applySortPlan(selectedIds = null) {
-  if (!currentSortPlan) return;
+  if (!currentSortPlan || sortBusy) return;
   const chosen = new Set(selectedIds || currentSortPlan.suggestions.map(suggestion => suggestion.id));
   const chosenSuggestions = currentSortPlan.suggestions.filter(suggestion => chosen.has(suggestion.id));
   if (!chosenSuggestions.length) return;
-  const root = sortRoot();
+  const root = {path:currentSortPlan.root_path};
   const destination = chosenSuggestions[0].destination_relative;
   const question = chosenSuggestions.length === 1
     ? `Approve moving ${chosenSuggestions[0].source_relative} to ${root ? sortFolderPath(root, destination.split(/[\\/]/).slice(0, -1).join('/')) : destination}?`
     : `Approve moving ${chosenSuggestions.length} files to their reviewed destinations?`;
-  if (!window.confirm(question)) return;
+  if (!await requestSortApproval('Move reviewed files?', question)) return;
+  sortBusy = true;
+  filesRevision += 1;
   try {
-    const sameFolder = chosenSuggestions.every(suggestion => suggestion.destination_folder === chosenSuggestions[0].destination_folder);
     const result = await post('/api/files/sort/approve-idea', {
       plan_id: currentSortPlan.id,
-      folder: sameFolder ? chosenSuggestions[0].destination_folder : null,
-      suggestion_id: sameFolder ? null : chosenSuggestions[0].id,
+      suggestion_ids: chosenSuggestions.map(s => s.id),
       confirm: true,
     });
     currentSortPlan = result.plan;
     renderSortPlan(currentSortPlan);
     $('sort-feedback').textContent = `Sort AI finished: ${result.applied.length} applied, ${result.failed.length} failed. Original files were not deleted.`;
-    await refreshFiles();
   } catch (error) {
     $('sort-feedback').textContent = error.message;
     $('sort-feedback').style.color = '#f0aaa0';
+  } finally {
+    sortBusy = false;
+    await refreshFiles();
   }
 }
 
 async function undoSortPlan() {
-  if (!currentSortPlan) return;
-  if (!window.confirm('Undo eligible Sort AI changes? This will not overwrite a path that has changed.')) return;
+  if (!currentSortPlan || sortBusy) return;
+  if (!await requestSortApproval('Undo this sorting batch?', 'Restore eligible file moves to their original locations. Paths that changed will not be overwritten.')) return;
+  sortBusy = true;
+  filesRevision += 1;
   try {
     const result = await post('/api/files/sort/undo', { plan_id: currentSortPlan.id });
     currentSortPlan = result.plan;
     renderSortPlan(currentSortPlan);
     $('sort-feedback').textContent = `Sort AI undo: ${result.rolled_back.length} restored, ${result.failed.length} need review.`;
-    await refreshFiles();
   } catch (error) {
     $('sort-feedback').textContent = error.message;
     $('sort-feedback').style.color = '#f0aaa0';
+  } finally {
+    sortBusy = false;
+    await refreshFiles();
+  }
+}
+
+async function keepSortFiles(ids) {
+  if (!currentSortPlan || sortBusy) return;
+  sortBusy = true;
+  filesRevision += 1;
+  try {
+    currentSortPlan = await post('/api/files/sort/keep', {plan_id:currentSortPlan.id, suggestion_ids:ids, confirm:true});
+    renderSortPlan(currentSortPlan);
+    $('sort-feedback').textContent = `Keeping ${ids.length} file(s) here. Sort AI will remember this until their indexed size or timestamp changes.`;
+  } catch (error) {
+    $('sort-feedback').textContent = error.message;
+  } finally {
+    sortBusy = false;
+    await refreshFiles();
   }
 }
 
@@ -635,6 +762,31 @@ $('search-form').addEventListener('submit', async (e) => {
 });
 
 $('sort-generate').addEventListener('click', generateSortPlan);
+$('sort-confirm-approve').addEventListener('click', () => finishSortApproval(true));
+$('sort-confirm-cancel').addEventListener('click', () => finishSortApproval(false));
+$('sort-confirm-dialog').addEventListener('cancel', event => {event.preventDefault(); finishSortApproval(false);});
+$('sort-auto').addEventListener('click', autoSortClearMatches);
+$('sort-root').addEventListener('change', () => {
+  filesRevision += 1;
+  currentSortPlan = null;
+  renderSortPlan(null);
+  $('sort-feedback').textContent = '';
+});
+$('sort-history').addEventListener('change', async () => {
+  const id = $('sort-history').value;
+  if (!id || sortBusy) return;
+  filesRevision += 1;
+  sortBusy = true;
+  try {
+    currentSortPlan = await request('/api/files/sort/plan/' + encodeURIComponent(id));
+    if ([...$('sort-root').options].some(option => Number(option.value) === currentSortPlan.root_id)) $('sort-root').value = String(currentSortPlan.root_id);
+    renderSortPlan(currentSortPlan);
+  } catch (error) {
+    $('sort-feedback').textContent = error.message;
+  } finally {
+    sortBusy = false;
+  }
+});
 $('file-permission-confirm').addEventListener('click', () => finishRootApproval(true));
 $('file-permission-cancel').addEventListener('click', () => finishRootApproval(false));
 $('file-permission-dialog').addEventListener('cancel', event => {
