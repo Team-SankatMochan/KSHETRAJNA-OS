@@ -51,13 +51,14 @@ def session(executable: Path, data: Path, *, demo: bool):
         assert "Quit Kshetrajna" in page
         for asset in ("/app.js", "/chat.js", "/chat.css", "/files.js"):
             assert call_http(port, asset)[0] == 200, asset
-        state = json.loads(call_http(port, "/api/state")[1])
+        assert call_http(port, "/api/state")[0] == 403
+        state = json.loads(call_http(port, "/api/state", token=token)[1])
         assert state["mode"] == ("demo" if demo else "live")
         if not demo:
             for setting in ("enabled", "allow_local_ai", "allow_maintenance", "allow_priority_changes", "allow_process_control"):
                 assert state["settings"][setting] is False, setting
         assert call_http(port, "/api/shutdown", body={"confirm": True}, token="invalid")[0] == 403
-        assert call_http(port, "/api/state")[0] == 200
+        assert call_http(port, "/api/state", token=token)[0] == 200
         assert call_http(port, "/api/shutdown", body={"confirm": True}, token=token)[0] == 200
         output = process.communicate(timeout=20)[0]
         assert process.returncode == 0, output

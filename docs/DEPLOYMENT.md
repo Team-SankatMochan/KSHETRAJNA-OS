@@ -53,14 +53,15 @@ python -m kshetrajna.jarvis --url http://127.0.0.1:8765 sort_apply --plan-id PLA
 python -m kshetrajna.jarvis --url http://127.0.0.1:8765 sort_undo --plan-id PLAN_ID --confirm
 ```
 
-`kshetrajna-sort` is installed as a convenience entry point and defaults to
+`kshetrajna-sort` is installed as a convenience entry point. Bare invocation
+prints help without opening storage or networking. Sort scope options default to
 `sort_preview`; `python -m kshetrajna.cli sort --url ...` is the equivalent
-source command. A JSON-lines mode is available for assistant subprocesses.
+source command. Explicit `--jsonl` mode is available for assistant subprocesses.
 The bridge discovers the dashboard token from the local page, validates that
 the target is loopback, and never exposes arbitrary commands. Creating a
 preview stores a plan; specifying a new folder also approves indexing it.
-Original files are changed only by apply or undo, which require explicit
-confirmation.
+Original files are changed only by explicitly confirmed apply, undo, or cleanup
+deletion commands. Cleanup deletion is permanent; see [reviewed cleanup](CLEANUP.md).
 
 ## Snapdragon X / Windows ARM64
 

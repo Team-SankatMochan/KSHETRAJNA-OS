@@ -27,6 +27,7 @@
         <a href="#chat" data-view="chat"><span aria-hidden="true">✦</span>Assistant</a>
         <a href="#files" data-view="files"><span aria-hidden="true">▤</span>File library</a>
         <a href="#sort-ai" data-view="sort-ai"><span aria-hidden="true">⇄</span>Sort AI <small>Projects & files</small></a>
+        <a href="#cleanup" data-view="cleanup"><span aria-hidden="true">🗑</span>Disk Cleanup <small>Empty & duplicates</small></a>
         <a href="#workspaces" data-view="workspaces"><span aria-hidden="true">▦</span>Workspaces</a>
         <a href="#maintenance" data-view="maintenance"><span aria-hidden="true">◇</span>System tools</a>
         <a href="#history" data-view="history"><span aria-hidden="true">◷</span>History & undo</a>
@@ -40,8 +41,8 @@
       <div class="status" id="status"><span class="status-dot"></span><span id="status-text">Loading…</span></div>
     </header>
 
-    <main>
-      <div class="view-heading"><div><p class="eyebrow" id="view-kicker">YOUR DEVICE, UNDERSTOOD</p><h1 id="view-title">Overview</h1><p id="view-description">A calm view of what matters on your computer.</p></div><a href="#sort-ai" class="heading-action">Organize my files <span>↗</span></a></div>
+    <main aria-labelledby="view-title">
+      <div class="view-heading"><div><p class="eyebrow" id="view-kicker">YOUR DEVICE, UNDERSTOOD</p><h1 id="view-title" tabindex="-1">Overview</h1><p id="view-description">A calm view of what matters on your computer.</p></div><a href="#sort-ai" class="heading-action">Organize my files <span>↗</span></a></div>
       <section class="hero">
         <div><p class="eyebrow">A LITTLE LESS FRICTION</p><h2>Your space.<br><em>Working together.</em></h2><p class="intro">See your workload, find your files, and organize your projects. Everything stays on this device.</p><div class="hero-links"><a href="#chat">Ask your assistant ↗</a><a href="#files">Explore file library ↗</a></div></div>
         <div class="hero-action"><button id="capture-button" class="primary" disabled>Enable collection</button><button id="export-button" class="secondary">Download session report</button><small>Explainable · Measurable · Under your control</small></div>
@@ -185,6 +186,38 @@
           <div id="file-action-journal" class="decision-journal"></div>
         </article>
       </section>
+      <section class="grid lower-grid cleanup-grid" id="cleanup">
+        <article class="panel cleanup-overview">
+          <div class="panel-head"><div><p class="eyebrow">CLEANUP SCOPE</p><h2>Inspect before you reclaim</h2></div><span class="quiet" id="cleanup-scope-status" role="status" aria-live="polite">SCAN REQUIRED</span></div>
+          <p class="control-note">Cleanup only uses files already indexed in your approved locations. Pick a scope, scan it, then review every exact path before an action. A scan never deletes anything.</p>
+          <div class="cleanup-toolbar">
+            <label class="input-label" for="cleanup-scope">Approved scope<select id="cleanup-scope"><option value="all">All approved locations</option></select></label>
+            <div class="cleanup-scope-copy"><strong id="cleanup-scope-label">All approved locations</strong><span id="cleanup-scope-path">Waiting for an approved, indexed location.</span></div>
+          </div>
+          <div id="cleanup-summary" class="summary-grid cleanup-summary" aria-live="polite" aria-atomic="true"></div>
+          <p id="cleanup-scope-note" class="cleanup-scope-note" role="status">Results will be limited to the indexed files in this scope. A partial scan is shown as partial; failed locations are not presented as complete.</p>
+          <p id="cleanup-feedback" class="feedback" role="status" aria-live="polite"></p>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><div><p class="eyebrow">CLEANUP / ZERO-BYTE FILES</p><h2>Empty Files</h2></div><span class="quiet" id="cleanup-empty-status" role="status" aria-live="polite">SCAN REQUIRED</span></div>
+          <p class="cleanup-scope-note" id="cleanup-empty-scope">Scope: all approved locations</p>
+          <p class="control-note">These are <strong>zero-byte candidates</strong>, not duplicate matches. Structural markers such as <code>__init__.py</code>, <code>.gitkeep</code>, <code>.keep</code>, and <code>py.typed</code> stay protected and are excluded. Deletion is permanent and cannot be undone; the action journal is an audit record only.</p>
+          <div class="control-actions" style="margin-bottom:0.75rem;">
+            <button type="button" id="cleanup-scan-empty" class="secondary" disabled>Find empty files</button>
+          </div>
+          <div id="cleanup-empty-list" class="decision-journal" aria-live="polite" aria-busy="false"><p class="empty">Choose an approved scope, then scan for zero-byte candidates.</p></div>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><div><p class="eyebrow">CLEANUP / DUPLICATES</p><h2>Duplicate Files</h2></div><span class="quiet" id="cleanup-dup-status" role="status" aria-live="polite">SCAN REQUIRED</span></div>
+          <p class="cleanup-scope-note" id="cleanup-dup-scope">Scope: all approved locations</p>
+          <p class="control-note">These are <strong>exact-content duplicates</strong>: each group has identical bytes verified by the full SHA-256 digest. Matching names or sizes alone do not qualify. One copy is marked keep. Deletion is permanent and cannot be undone; the action journal is an audit record only.</p>
+          <div class="control-actions" style="margin-bottom:0.75rem;">
+            <button type="button" id="cleanup-scan-dup" class="secondary" disabled>Find duplicates</button>
+          </div>
+          <div id="cleanup-dup-summary" class="sort-plan-meta" style="margin-bottom:0.5rem;"></div>
+          <div id="cleanup-dup-list" class="sort-suggestions" aria-live="polite" aria-busy="false"><p class="empty">Choose an approved scope, then scan for exact SHA-256 duplicates.</p></div>
+        </article>
+      </section>
       <footer><span>KSHETRAJNA / HACKATHON PROTOTYPE v0.4.3</span><span>LOCAL INTELLIGENCE · EXPLICIT CONSENT · AUDITABLE ACTIONS</span></footer>
     </main>
   </div>
@@ -196,7 +229,15 @@
   <dialog id="chat-action-dialog"><p class="eyebrow">REVIEW BEFORE APPROVAL</p><h2 id="chat-action-title"></h2><p id="chat-action-effect"></p><p id="chat-action-undo" class="approval-effect"></p><div id="chat-action-candidates" class="maintenance-candidates" hidden></div><label id="chat-action-name-row" class="input-label" hidden>Type the exact app name to confirm force termination<input id="chat-action-name" autocomplete="off" maxlength="150"></label><p id="chat-action-mode" class="control-note"></p><p id="chat-action-error" class="feedback" role="alert"></p><div class="control-actions"><button type="button" id="chat-action-confirm" class="primary">Approve this action</button><button type="button" id="chat-action-cancel" class="secondary">Cancel</button></div></dialog>
   <dialog id="sort-confirm-dialog" aria-labelledby="sort-confirm-title"><p class="eyebrow">SORT AI / ONE BATCH APPROVAL</p><h2 id="sort-confirm-title"></h2><p id="sort-confirm-copy" style="white-space: pre-line"></p><div class="control-actions"><button id="sort-confirm-approve" type="button" class="primary">Approve</button><button id="sort-confirm-cancel" type="button" class="secondary">Cancel</button></div></dialog>
   <dialog id="locations-dialog" aria-labelledby="locations-title"><p class="eyebrow">ONE LOCAL ACCESS APPROVAL</p><h2 id="locations-title">Choose your scan scope</h2><p>Index selected folders locally, up to 200,000 files per location. Reads metadata and bounded allowed excerpts. No files move during scanning; no uploads or administrator privileges.</p><label class="scope-all"><input type="checkbox" id="locations-all"> Select available locations</label><div id="locations-list" class="locations-list"></div><p class="control-note">Up to 20 non-overlapping locations. Existing approved folders and their children are reused. System/app data, protected files, links, cloud-only files and inaccessible paths are skipped. Scans can be cancelled in the library.</p><p id="locations-feedback" class="feedback" role="status"></p><div class="control-actions"><button type="button" id="locations-confirm" class="primary">Approve selected locations & scan</button><button type="button" id="locations-cancel" class="secondary">Cancel</button></div></dialog>
-  <dialog id="sort-destination-dialog"><p class="eyebrow">CHOOSE A HOME</p><h2>Move this reviewed file</h2><p id="destination-source"></p><label class="input-label">Approved destination location<select id="destination-root"></select></label><label class="input-label">Folder inside the location<input id="destination-folder" placeholder="Projects/Aarthika"></label><p class="control-note">The original filename is preserved. No overwriting; eligible moves can be undone.</p><div class="control-actions"><button type="button" id="destination-confirm" class="primary">Review this destination</button><button type="button" id="destination-cancel" class="secondary">Cancel</button></div><p id="destination-feedback" class="feedback" role="status"></p></dialog>
-  <div id="toast" role="status" hidden></div>
+   <dialog id="sort-destination-dialog"><p class="eyebrow">CHOOSE A HOME</p><h2>Move this reviewed file</h2><p id="destination-source"></p><label class="input-label">Approved destination location<select id="destination-root"></select></label><label class="input-label">Folder inside the location<input id="destination-folder" placeholder="Projects/Aarthika"></label><p class="control-note">The original filename is preserved. No overwriting; eligible moves can be undone.</p><div class="control-actions"><button type="button" id="destination-confirm" class="primary">Review this destination</button><button type="button" id="destination-cancel" class="secondary">Cancel</button></div><p id="destination-feedback" class="feedback" role="status"></p></dialog>
+   <dialog id="cleanup-confirm-dialog" aria-labelledby="cleanup-confirm-title" aria-describedby="cleanup-confirm-copy">
+     <p class="eyebrow">CLEANUP / FINAL REVIEW</p>
+     <h2 id="cleanup-confirm-title">Confirm file deletion</h2>
+     <p id="cleanup-confirm-copy"></p>
+     <div id="cleanup-confirm-effect" class="approval-effect"></div>
+      <p id="cleanup-confirm-mode" class="control-note">Deletion is permanent and cannot be undone. The action journal records the result for audit only.</p>
+     <div class="control-actions"><button type="button" id="cleanup-confirm-delete" class="danger">Delete this file</button><button type="button" id="cleanup-confirm-cancel" class="secondary">Keep file</button></div>
+   </dialog>
+   <div id="toast" role="status" hidden></div>
 </body>
 </html>

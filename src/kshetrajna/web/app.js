@@ -16,7 +16,11 @@ let toastTimer;
 let appStopped = false;
 
 async function request(path, options = {}) {
-  const response = await fetch(path, { cache: 'no-store', ...options });
+  const headers = new Headers(options.headers || {});
+  if (path.startsWith('/api/') && !headers.has('X-Kshetrajna-Token')) {
+    headers.set('X-Kshetrajna-Token', token);
+  }
+  const response = await fetch(path, { cache: 'no-store', ...options, headers });
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
   return data;

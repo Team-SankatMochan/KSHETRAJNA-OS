@@ -107,6 +107,10 @@ class PhaseOneTests(unittest.TestCase):
         connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
         connection.request("GET", "/api/state")
         response = connection.getresponse()
+        self.assertEqual(response.status, 403)
+        response.read()
+        connection.request("GET", "/api/state", headers={"X-Kshetrajna-Token": server.token})
+        response = connection.getresponse()
         self.assertEqual(response.status, 200)
         self.assertFalse(json.loads(response.read())["settings"]["enabled"])
         connection.request("POST", "/api/settings", json.dumps({"enabled": True}),

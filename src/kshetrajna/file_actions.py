@@ -1,12 +1,29 @@
 import os
 import secrets
+import hashlib
+import json
+import stat
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import logging
 
 from .file_storage import FileStore
+from .file_scanner import is_sensitive_file
+from .file_insights import PROJECT_MARKERS
 
 logger = logging.getLogger(__name__)
+
+# File actions are deliberately bounded even when an approved location contains
+# a very large file.  Cleanup passes use the same bound before they create a
+# DELETE journal record.  The limit is a safety boundary, not a claim that a
+# file was fully compared when it is exceeded.
+HASH_CHUNK_BYTES = 64 * 1024
+MAX_HASH_BYTES = 100 * 1024 * 1024
+PROTECTED_ACTION_NAMES = frozenset({
+    "__init__.py", "__init__.pyi", ".gitkeep", ".keep", ".gitignore",
+    ".editorconfig", ".gitattributes", ".gitmodules", "py.typed",
+    *(marker.casefold() for marker in PROJECT_MARKERS),
+})
 
 class FileActionManager:
     def __init__(self, store: FileStore):
@@ -67,12 +84,26 @@ class FileActionManager:
         destination_relative: str,
         mode: str = "live",
         destination_root_id: int | None = None,
+        *,
+        expected_sha256: str | None = None,
+        expected_peer_ids: list[int] | None = None,
     ) -> dict:
         """
         Create a file mutation proposal.
         """
         if kind not in ("RENAME", "MOVE", "DELETE"):
             raise ValueError(f"Invalid action kind: {kind}")
+        if expected_sha256 is not None and (
+                not isinstance(expected_sha256, str)
+                or len(expected_sha256) != hashlib.sha256().digest_size * 2
+                or any(character not in "0123456789abcdef" for character in expected_sha256.lower())):
+            raise ValueError("Invalid expected SHA-256 digest")
+        if expected_sha256 is not None:
+            expected_sha256 = expected_sha256.lower()
+        if expected_peer_ids is not None and (
+                not isinstance(expected_peer_ids, list)
+                or any(type(peer_id) is not int or peer_id <= 0 for peer_id in expected_peer_ids)):
+            raise ValueError("Invalid duplicate survivor records")
             
         with self.store._connect() as db:
             file_row = db.execute("SELECT r.path as root_path, f.root_id, f.relative_path, f.name, f.is_directory FROM files f JOIN roots r ON f.root_id = r.id WHERE f.id=?", (file_id,)).fetchone()
@@ -80,6 +111,11 @@ class FileActionManager:
                 raise ValueError("File not found")
             if file_row["is_directory"]:
                 raise ValueError("Directories cannot be deleted or moved by a file action")
+            if kind == "DELETE":
+                if file_row["name"].casefold() in PROTECTED_ACTION_NAMES:
+                    raise ValueError("Protected structural or project marker cannot be deleted")
+                if is_sensitive_file(file_row["name"], Path(file_row["name"]).suffix[1:], file_row["relative_path"]):
+                    raise ValueError("Protected sensitive file cannot be deleted")
         target_root_id = file_row['root_id'] if destination_root_id is None else destination_root_id
         if type(target_root_id) is not int or target_root_id <= 0:
             raise ValueError('Invalid destination root')
@@ -88,6 +124,8 @@ class FileActionManager:
         target_root = self.store.get_root(target_root_id)
         if not target_root or target_root['status'] not in ('ready', 'pending', 'error', 'truncated'):
             raise ValueError('Destination root is missing or being scanned')
+        if kind == "DELETE" and target_root["status"] not in ("ready", "truncated"):
+            raise ValueError("Delete actions require a ready or truncated approved root")
                 
         if not destination_relative or destination_relative.strip() == "":
             raise ValueError("Destination cannot be empty")
@@ -151,6 +189,8 @@ class FileActionManager:
             "expected_ctime_ns": expected_ctime_ns,
             "expected_dev": expected_dev,
             "expected_ino": expected_ino,
+            "expected_sha256": expected_sha256,
+            "expected_peer_ids": json.dumps(expected_peer_ids) if expected_peer_ids is not None else None,
             
             "created_at": self._iso(now),
             "expires_at": self._iso(expires_at),
@@ -217,6 +257,124 @@ class FileActionManager:
                 raise ValueError("Path escapes approved root")
             current = parent
 
+    def _unlink_verified(self, root_path: Path, relative_path: str, expected: os.stat_result) -> None:
+        """Unlink through verified directory descriptors where the platform supports it.
+
+        Path-based unlinking is vulnerable to an ancestor directory being
+        swapped for a link after validation. POSIX descriptor-relative,
+        no-follow traversal keeps the approved directory chain stable. Windows
+        retains the existing reparse checks; its native handle implementation
+        remains a separate platform qualification concern.
+        """
+        components = relative_path.replace("\\", "/").split("/")
+        if (not components or any(not part or part in (".", "..") for part in components)
+                or os.name == "nt" or os.open not in getattr(os, "supports_dir_fd", set())):
+            os.remove(root_path / relative_path)
+            return
+
+        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptors = []
+        try:
+            current = os.open(root_path, directory_flags)
+            descriptors.append(current)
+            for component in components[:-1]:
+                current = os.open(component, directory_flags, dir_fd=current)
+                descriptors.append(current)
+            parent_fd = descriptors[-1]
+            name = components[-1]
+            current_stat = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+            if (not stat.S_ISREG(current_stat.st_mode)
+                    or (current_stat.st_dev, current_stat.st_ino, current_stat.st_size,
+                        current_stat.st_mtime_ns)
+                    != (expected.st_dev, expected.st_ino, expected.st_size, expected.st_mtime_ns)):
+                raise ValueError("Source file changed before deletion")
+            os.unlink(name, dir_fd=parent_fd)
+        finally:
+            for descriptor in reversed(descriptors):
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+
+    @staticmethod
+    def _hash_regular_file(path: Path, expected_size: int | None = None) -> str | None:
+        """Hash a regular file with bounded memory and stable identity.
+
+        Returning ``None`` means the file was missing, was not a regular file,
+        exceeded the hash budget, or changed while it was being read.  Cleanup
+        treats every such result as a conflict rather than deleting a file on
+        stale evidence.
+        """
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = None
+        try:
+            descriptor = os.open(path, flags)
+            with os.fdopen(descriptor, "rb") as stream:
+                descriptor = None
+                before = os.fstat(stream.fileno())
+                if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_HASH_BYTES:
+                    return None
+                if expected_size is not None and before.st_size != expected_size:
+                    return None
+                digest = hashlib.sha256()
+                total = 0
+                while True:
+                    chunk = stream.read(HASH_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > MAX_HASH_BYTES:
+                        return None
+                    digest.update(chunk)
+                after = os.fstat(stream.fileno())
+                if ((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+                        != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)):
+                    return None
+                return digest.hexdigest()
+        except (OSError, ValueError):
+            return None
+        finally:
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+
+    def _has_expected_duplicate_peer(self, action: dict) -> bool:
+        """Confirm that a journaled duplicate still has a live survivor."""
+        try:
+            peer_ids = json.loads(action.get("expected_peer_ids") or "[]")
+        except (TypeError, json.JSONDecodeError):
+            return False
+        if not isinstance(peer_ids, list) or not peer_ids or not action.get("expected_sha256"):
+            return False
+        target_size = action.get("expected_size")
+        rows = []
+        # SQLite's default variable limit is commonly 999; duplicate scans
+        # may legitimately produce more peers than that, so query in chunks.
+        for offset in range(0, len(peer_ids), 900):
+            chunk = peer_ids[offset:offset + 900]
+            with self.store._connect() as db:
+                rows.extend(db.execute(
+                    "SELECT f.id, f.relative_path, r.path AS root_path, r.status "
+                    "FROM files f JOIN roots r ON r.id=f.root_id "
+                    "WHERE f.id IN ({})".format(",".join("?" for _ in chunk)),
+                    tuple(chunk),
+                ).fetchall())
+        for row in rows:
+            if row["status"] not in ("ready", "truncated"):
+                continue
+            root_path = Path(row["root_path"])
+            candidate = root_path / row["relative_path"]
+            try:
+                self._validate_path_safety(root_path, candidate)
+                digest = self._hash_regular_file(candidate, expected_size=target_size)
+            except (OSError, ValueError):
+                continue
+            if digest == action.get("expected_sha256"):
+                return True
+        return False
+
     def apply_action(self, proposal_id: str) -> dict:
         action = self.store.get_file_action(proposal_id=proposal_id)
         if not action:
@@ -233,6 +391,8 @@ class FileActionManager:
             root_row = db.execute("SELECT path, status FROM roots WHERE id=?", (action["root_id"],)).fetchone()
             if not root_row or root_row["status"] not in ("ready", "pending", "error", "truncated"):
                 raise ValueError("Root is invalid or being scanned")
+            if action["kind"] == "DELETE" and root_row["status"] not in ("ready", "truncated"):
+                raise ValueError("Delete actions require a ready or truncated approved root")
                 
         # Demo simulation check
         if action["mode"] == "demo":
@@ -277,6 +437,21 @@ class FileActionManager:
             if action['expected_dev'] is not None and (st.st_dev != action['expected_dev'] or st.st_ino != action['expected_ino']):
                 self.store.update_file_action(action["id"], {"status": "failed", "error": "Source file identity changed"})
                 raise ValueError('Source file identity changed')
+            if action.get("expected_ctime_ns") is not None and getattr(st, "st_ctime_ns", None) != action["expected_ctime_ns"]:
+                self.store.update_file_action(action["id"], {"status": "failed", "error": "Source file creation/change time changed"})
+                raise ValueError("Source file creation/change time changed")
+            if action.get("expected_sha256") is not None:
+                digest = self._hash_regular_file(abs_source, expected_size=action.get("expected_size"))
+                if digest != action["expected_sha256"]:
+                    self.store.update_file_action(action["id"], {"status": "failed", "error": "Source file content changed"})
+                    raise ValueError("Source file content changed")
+                # Hashing is intentionally followed by another identity check;
+                # a file can be replaced between the initial stat and the hash.
+                latest = abs_source.stat(follow_symlinks=False)
+                if ((latest.st_dev, latest.st_ino, latest.st_size, latest.st_mtime_ns)
+                        != (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)):
+                    self.store.update_file_action(action["id"], {"status": "failed", "error": "Source file changed while validating content"})
+                    raise ValueError("Source file changed while validating content")
             current_file = self.store.get_file(action['file_id'])
             if not current_file or current_file['root_id'] != action['root_id'] or current_file['relative_path'] != action['source_relative']:
                 self.store.update_file_action(action["id"], {"status": "failed", "error": "Source catalog location changed"})
@@ -302,9 +477,23 @@ class FileActionManager:
         # journal-before-mutation and identity checks as a move, but its file
         # catalog row is removed only in the transaction that marks it deleted.
         if action["kind"] == "DELETE":
+            if action.get("expected_peer_ids") and not self._has_expected_duplicate_peer(action):
+                self.store.update_file_action(action["id"], {"status": "failed", "error": "No duplicate survivor remains"})
+                raise ValueError("No duplicate survivor remains")
+            # A final no-follow stat is the last journal-side identity check
+            # immediately before the irreversible unlink.
+            try:
+                latest = abs_source.stat(follow_symlinks=False)
+                if ((latest.st_dev, latest.st_ino, latest.st_size, latest.st_mtime_ns)
+                        != (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)):
+                    self.store.update_file_action(action["id"], {"status": "failed", "error": "Source file changed before deletion"})
+                    raise ValueError("Source file changed before deletion")
+            except FileNotFoundError:
+                self.store.update_file_action(action["id"], {"status": "stale", "error": "Source missing"})
+                raise ValueError("Source file missing")
             self.store.update_file_action(action["id"], {"status": "prepared", "prepared_at": self._iso(self._now())})
             try:
-                os.remove(abs_source)
+                self._unlink_verified(root_path, action["source_relative"], st)
             except BaseException as e:
                 self.store.update_file_action(action["id"], {"status": "failed", "error": str(e)})
                 raise ValueError(f"Deletion failed: {e}")
@@ -314,6 +503,9 @@ class FileActionManager:
                     ("deleted", self._iso(self._now()), action["id"]),
                 )
                 db.execute("DELETE FROM files WHERE id=?", (action["file_id"],))
+            self.store.refresh_root_totals(action["root_id"])
+            if action.get("destination_root_id") and action["destination_root_id"] != action["root_id"]:
+                self.store.refresh_root_totals(action["destination_root_id"])
             return {"status": "deleted", "message": "DELETED PERMANENTLY"}
 
         # PREPARED state

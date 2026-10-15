@@ -70,14 +70,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if isinstance(value, bool) or not isinstance(value, str) or not value.isdecimal():
             raise ValueError(f"Invalid {name}")
         parsed = int(value)
-        if parsed <= 0:
+        if not 0 < parsed <= 2**63 - 1:
             raise ValueError(f"Invalid {name}")
         return parsed
 
     @staticmethod
     def _body_file_id(body: dict, name: str) -> int:
         value = body.get(name)
-        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 < value <= 2**63 - 1:
             raise ValueError(f"Invalid {name}")
         return value
 
@@ -86,6 +86,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._json(403, {"error": "Host rejected"})
             return
         path = urlsplit(self.path).path
+        if path.startswith("/api/"):
+            supplied_token = self.headers.get("X-Kshetrajna-Token", "")
+            if not supplied_token.isascii() or not hmac.compare_digest(supplied_token, self.server.token):
+                self._json(403, {"error": "Request requires the dashboard session"})
+                return
         assets = {"/": ("index.html", "text/html; charset=utf-8"),
                   "/app.css": ("app.css", "text/css; charset=utf-8"),
                   "/app.js": ("app.js", "text/javascript; charset=utf-8"),
@@ -176,6 +181,24 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._json(400, {"error": str(e)})
         elif path == "/api/files/actions" and self.server.file_service:
             self._json(200, {"actions": self.server.file_service.get_action_journal()})
+        elif path == "/api/files/empty" and self.server.file_service:
+            from urllib.parse import parse_qs
+            try:
+                qs = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+                root_id = (self._parse_file_id(qs["root_id"][0], "root_id")
+                           if "root_id" in qs else None)
+                self._json(200, self.server.file_service.get_empty_files(root_id))
+            except ValueError as e:
+                self._json(400, {"error": str(e)})
+        elif path == "/api/files/duplicates" and self.server.file_service:
+            from urllib.parse import parse_qs
+            try:
+                qs = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+                root_id = (self._parse_file_id(qs["root_id"][0], "root_id")
+                           if "root_id" in qs else None)
+                self._json(200, self.server.file_service.get_duplicate_groups(root_id))
+            except ValueError as e:
+                self._json(400, {"error": str(e)})
         elif path.startswith("/api/files/sort/plan/") and self.server.file_service:
             plan_id = path.rsplit("/", 1)[-1]
             if not plan_id or len(plan_id) > 100:
@@ -316,13 +339,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.server.file_service.remove_root(self._body_file_id(body, "root_id"))
                 self._json(200, {"removed": True})
             elif path == "/api/files/delete-all" and self.server.file_service:
+                if body.get("confirm") is not True:
+                    raise ValueError("Deleting file intelligence data requires confirm=true")
                 self.server.file_service.delete_all()
                 self._json(200, {"deleted": True})
             elif path == "/api/files/actions/propose" and self.server.file_service:
+                if body.get("kind") == "DELETE" and body.get("confirm") is not True:
+                    raise ValueError("Deleting a file requires confirm=true")
                 self._json(200, self.server.file_service.create_proposal(
                     self._body_file_id(body, "file_id"), body.get("kind"), body.get("destination"), body.get('destination_root_id')))
             elif path == "/api/files/actions/apply" and self.server.file_service:
-                result = self.server.file_service.apply_action(body.get("proposal_id"))
+                result = self.server.file_service.apply_action(body.get("proposal_id"), confirm=body.get("confirm"))
                 self._json(200 if result.get("status") in ("applied", "deleted") else 409, result)
             elif path == "/api/files/actions/undo" and self.server.file_service:
                 result = self.server.file_service.undo_action(body.get("action_id"))
@@ -358,6 +385,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
             elif path == "/api/files/sort/undo" and self.server.file_service:
                 result = self.server.file_service.undo_sort_plan(body.get("plan_id"))
                 self._json(200 if result.get("status") == "rolled_back" else 409, result)
+            elif path == "/api/files/empty/delete" and self.server.file_service:
+                result = self.server.file_service.delete_empty_file(
+                    self._body_file_id(body, "file_id"), confirm=body.get("confirm"))
+                self._json(200 if result.get("deleted") else 409, result)
+            elif path == "/api/files/duplicates/delete" and self.server.file_service:
+                result = self.server.file_service.delete_duplicate_file(
+                    self._body_file_id(body, "file_id"), confirm=body.get("confirm"))
+                self._json(200 if result.get("deleted") else 409, result)
             else:
                 self._json(404, {"error": "Not found"})
         except (ValueError, TypeError) as error:

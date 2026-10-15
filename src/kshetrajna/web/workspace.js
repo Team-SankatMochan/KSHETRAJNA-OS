@@ -4,6 +4,7 @@ const viewCopy = {
   chat: ['THINK OUT LOUD', 'Your assistant', 'Conversation and reviewed PC tools, running on your device.'],
   files: ['KNOW WHAT YOU HAVE', 'File library', 'Scan your chosen locations once. Find files and understand your index.'],
   'sort-ai': ['A HOME FOR EVERYTHING', 'Sort AI', 'Connect scattered files to projects and existing folders.'],
+  cleanup: ['RECLAIM WASTED DISK SPACE', 'Disk Cleanup', 'Find and safely remove 0-byte files and duplicate copies.'],
   workspaces: ['MAKE ROOM FOR FOCUS', 'Workspaces', 'Your recurring routines and saved application boards.'],
   maintenance: ['A LITTLE HOUSEKEEPING', 'System tools', 'Inspect each action, its scope and its undo limitations.'],
   history: ['EVERY CHANGE, ACCOUNTED FOR', 'History & undo', 'Inspect decisions and restore eligible changes.'],
@@ -23,6 +24,7 @@ for (const section of originalSections) {
   let view = 'overview';
   if (section.id === 'chat') view = 'chat';
   else if (section.id === 'maintenance') view = 'maintenance';
+  else if (section.id === 'cleanup') view = 'cleanup';
   else if (section.id === 'files' || section.querySelector('#file-insights-types')) view = 'files';
   else if (section.id === 'sort-ai') view = 'sort-ai';
   if (section.querySelector('#workspace-form')) {
@@ -52,6 +54,12 @@ function switchWorkspace() {
   document.title = `${title} · Kshetrajna`;
   document.body.dataset.view = key;
   window.scrollTo({top: 0, behavior: 'instant'});
+  // Move the virtual cursor to the new page heading after an in-app route
+  // change. The initial load keeps the browser's natural focus position.
+  if (document.body.dataset.workspaceReady === 'true') {
+    requestAnimationFrame(() => $('view-title')?.focus({preventScroll: true}));
+  }
+  document.body.dataset.workspaceReady = 'true';
 }
 window.addEventListener('hashchange', switchWorkspace);
 switchWorkspace();

@@ -15,7 +15,9 @@ import re
 import sys
 import tempfile
 import time
+from http.client import HTTPException
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
@@ -35,20 +37,76 @@ def _require_bool(value, name: str) -> bool:
     return value
 
 
+def _positive_id(value, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    if value > 2**63 - 1:
+        raise ValueError(f"{name} is outside the supported database ID range")
+    return value
+
+
+def _cli_positive_id(value: str) -> int:
+    try:
+        return _positive_id(int(value), "ID")
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a positive integer in the database ID range") from None
+
+
 def _loopback_base(url: str) -> str:
-    parsed = urlsplit(url)
+    try:
+        if not isinstance(url, str) or any(character.isspace() for character in url):
+            raise ValueError
+        parsed = urlsplit(url)
+        port = parsed.port
+    except ValueError:
+        raise ValueError("Invalid loopback dashboard URL") from None
     if parsed.scheme not in ("http", "https") or parsed.hostname not in ("127.0.0.1", "localhost"):
         raise ValueError("Jarvis integration accepts loopback URLs only")
-    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+    if parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment:
         raise ValueError("Jarvis integration URL must not contain credentials or query data")
+    if port == 0 or parsed.netloc.endswith(":") or parsed.path not in ("", "/"):
+        raise ValueError("Use the loopback dashboard base URL with a valid port and no path")
     return urlunsplit((parsed.scheme, parsed.netloc, "", "", "")).rstrip("/")
 
 
 class JarvisCommandBridge:
     """Dispatch safe sorting/search commands to an existing FileService."""
 
+    _CLEANUP_EMPTY_PREVIEW = frozenset({"empty_preview", "cleanup_empty"})
+    _CLEANUP_DUPLICATE_PREVIEW = frozenset({
+        "duplicate_preview", "duplicates_preview", "cleanup_duplicates",
+    })
+    _CLEANUP_EMPTY_DELETE = frozenset({"empty_delete", "cleanup_empty_delete"})
+    _CLEANUP_DUPLICATE_DELETE = frozenset({
+        "duplicate_delete", "duplicates_delete", "cleanup_duplicate_delete",
+    })
+
     def __init__(self, file_service: FileService):
         self.file_service = file_service
+
+    @classmethod
+    def _validate_args(cls, command: str, args: dict) -> None:
+        scope = ("root_id", "path", "known_folder")
+        if sum(args.get(key) is not None for key in scope) > 1:
+            raise ValueError("Choose only one of root_id, path, or known_folder")
+        if args.get("root_id") is not None:
+            _positive_id(args["root_id"], "root_id")
+        for key in ("path", "known_folder"):
+            if args.get(key) is not None and (not isinstance(args[key], str) or not args[key]):
+                raise ValueError(f"{key} must be nonempty text")
+        if "size_min" in args:
+            raise ValueError("size_min is not supported by the command bridge")
+        if command in cls._CLEANUP_EMPTY_DELETE | cls._CLEANUP_DUPLICATE_DELETE:
+            _positive_id(args.get("file_id"), "file_id")
+            if args.get("confirm") is not True:
+                raise ValueError(f"{command} requires confirm=true after reviewing the preview")
+        if command == "sort_preview":
+            if not any(args.get(key) is not None for key in scope):
+                raise ValueError("Provide root_id, path, or known_folder")
+            _require_bool(args.get("create_folders", False), "create_folders")
+        if command in ("sort_apply", "sort_undo"):
+            if _require_bool(args.get("confirm", False), "confirm") is not True:
+                raise ValueError(f"{command} requires confirm=true")
 
     def _wait_for_root(self, root_id: int, timeout: float = 60.0) -> dict:
         deadline = time.monotonic() + timeout
@@ -57,7 +115,7 @@ class JarvisCommandBridge:
             if not root:
                 raise ValueError("Approved root disappeared")
             if root["status"] not in ("pending", "scanning"):
-                if root["status"] != "ready":
+                if root["status"] not in ("ready", "truncated"):
                     raise ValueError(f"Folder scan ended with status {root['status']}")
                 return root
             time.sleep(0.05)
@@ -66,18 +124,12 @@ class JarvisCommandBridge:
     def _resolve_root(self, args: dict) -> int:
         root_id = args.get("root_id")
         if root_id is not None:
-            if isinstance(root_id, bool) or not isinstance(root_id, int) or root_id <= 0:
-                raise ValueError("root_id must be a positive integer")
             self._wait_for_root(root_id)
             return root_id
 
         path = args.get("path")
         known_id = args.get("known_folder")
-        if path is not None and known_id is not None:
-            raise ValueError("Choose path or known_folder, not both")
         if known_id is not None:
-            if not isinstance(known_id, str):
-                raise ValueError("known_folder must be text")
             match = next((folder for folder in discover_known_folders() if folder["id"] == known_id.casefold()), None)
             if not match:
                 raise ValueError("Known folder is unavailable; refresh discovery")
@@ -98,6 +150,7 @@ class JarvisCommandBridge:
         return added["id"]
 
     def execute(self, command: str, **args) -> dict:
+        self._validate_args(command, args)
         if command == "discover_folders":
             return {"folders": discover_known_folders()}
         if command == "approved_folders":
@@ -107,16 +160,30 @@ class JarvisCommandBridge:
             if not isinstance(query, str) or len(query) > 200:
                 raise ValueError("query must be text of at most 200 characters")
             return self.file_service.search(query, args.get("root_id"))
+        if command in self._CLEANUP_EMPTY_PREVIEW:
+            root_id = self._resolve_root(args) if any(
+                args.get(key) is not None for key in ("path", "known_folder")
+            ) else args.get("root_id")
+            return self.file_service.get_empty_files(root_id)
+        if command in self._CLEANUP_DUPLICATE_PREVIEW:
+            root_id = self._resolve_root(args) if any(
+                args.get(key) is not None for key in ("path", "known_folder")
+            ) else args.get("root_id")
+            return self.file_service.get_duplicate_groups(root_id)
+        if command in self._CLEANUP_EMPTY_DELETE:
+            return self.file_service.delete_empty_file(
+                args.get("file_id"), confirm=args.get("confirm", False)
+            )
+        if command in self._CLEANUP_DUPLICATE_DELETE:
+            return self.file_service.delete_duplicate_file(
+                args.get("file_id"), confirm=args.get("confirm", False)
+            )
         if command == "sort_preview":
             root_id = self._resolve_root(args)
             return self.file_service.generate_sort_plan(root_id, _require_bool(args.get("create_folders", False), "create_folders"))
         if command == "sort_apply":
-            if _require_bool(args.get("confirm", False), "confirm") is not True:
-                raise ValueError("sort_apply requires confirm=true after reviewing the preview")
             return self.file_service.apply_sort_plan(args.get("plan_id"))
         if command == "sort_undo":
-            if _require_bool(args.get("confirm", False), "confirm") is not True:
-                raise ValueError("sort_undo requires confirm=true")
             return self.file_service.undo_sort_plan(args.get("plan_id"))
         raise ValueError("Unknown Jarvis command")
 
@@ -130,36 +197,100 @@ class JarvisHttpClient:
         self.token = self._load_token()
 
     def _load_token(self) -> str:
-        with urlopen(Request(self.base_url + "/", method="GET"), timeout=self.timeout) as response:
-            html = response.read(256 * 1024).decode("utf-8")
+        try:
+            with urlopen(Request(self.base_url + "/", method="GET"), timeout=self.timeout) as response:
+                html = response.read(256 * 1024).decode("utf-8")
+        except (OSError, ValueError, HTTPException) as error:
+            raise ValueError("Could not read the loopback dashboard; check the URL and that it is running") from error
         match = re.search(r'<meta\s+name="csrf-token"\s+content="([^"]+)"', html)
         if not match:
             raise ValueError("Kshetrajna dashboard token was not found")
         return match.group(1)
 
     def _get(self, path: str) -> dict:
-        with urlopen(Request(self.base_url + path, method="GET"), timeout=self.timeout) as response:
-            return json.loads(response.read())
-
-    def _post(self, path: str, body: dict) -> dict:
-        request = Request(self.base_url + path, data=json.dumps(body).encode("utf-8"), method="POST", headers={
-            "Content-Type": "application/json",
-            "Origin": self.base_url,
+        request = Request(self.base_url + path, method="GET", headers={
             "X-Kshetrajna-Token": self.token,
         })
+        return self._request(request)
+
+    def _request(self, request: Request) -> dict:
         try:
             with urlopen(request, timeout=self.timeout) as response:
-                return json.loads(response.read())
-        except Exception as error:
-            if hasattr(error, "read"):
-                try:
-                    details = json.loads(error.read())
-                    raise ValueError(details.get("error", "Dashboard request failed")) from error
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    pass
-            raise ValueError("Dashboard request failed") from error
+                result = json.loads(response.read())
+        except HTTPError as error:
+            message = "Dashboard request failed"
+            try:
+                details = json.loads(error.read())
+                if isinstance(details, dict) and isinstance(details.get("error"), str):
+                    message = details["error"].replace(self.token, "[redacted]")
+            except (OSError, ValueError, HTTPException):
+                pass
+            raise ValueError(message) from error
+        except (OSError, ValueError, HTTPException) as error:
+            raise ValueError("Dashboard request failed; check that it is running and returning JSON") from error
+        if not isinstance(result, dict):
+            raise ValueError("Dashboard returned an invalid JSON response")
+        return result
+
+    def _resolve_remote_root(self, args: dict):
+        root_id = args.get("root_id")
+        if root_id is not None:
+            return root_id
+        known_id = args.get("known_folder")
+        if known_id:
+            folders = self._get("/api/files/known-folders")["folders"]
+            match = next((folder for folder in folders if folder["id"] == known_id.casefold()), None)
+            if not match:
+                raise ValueError("Known folder is unavailable; refresh discovery")
+            args["path"] = match["path"]
+        if args.get("path"):
+            roots = self._get("/api/files/state")["roots"]
+            path = str(Path(args["path"]).resolve(strict=False)).casefold()
+            existing = next((root for root in roots if str(Path(root["path"]).resolve(strict=False)).casefold() == path), None)
+            if existing:
+                return existing["id"]
+            added = self._post("/api/files/roots/add", {
+                "path": args["path"], "label": args.get("label", Path(args["path"]).name), "consent": True,
+            })
+            root_id = added["id"]
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                root = next((root for root in self._get("/api/files/state")["roots"] if root["id"] == root_id), None)
+                if root is None:
+                    raise ValueError("Approved root disappeared")
+                if root["status"] not in ("pending", "scanning"):
+                    if root["status"] not in ("ready", "truncated"):
+                        raise ValueError(f"Folder scan ended with status {root['status']}")
+                    break
+                time.sleep(.1)
+            else:
+                raise ValueError("Folder scan timed out")
+            return root_id
+        raise ValueError("Provide root_id, path, or known_folder")
+
+    def _cleanup_preview(self, command: str, args: dict) -> dict:
+        root_id = self._resolve_remote_root(args) if any(
+            args.get(key) is not None for key in ("root_id", "path", "known_folder")
+        ) else None
+        query = ""
+        if root_id is not None:
+            query = "?" + urlencode({"root_id": root_id})
+        if command in JarvisCommandBridge._CLEANUP_EMPTY_PREVIEW:
+            return self._get("/api/files/empty" + query)
+        return self._get("/api/files/duplicates" + query)
 
     def execute(self, command: str, **args) -> dict:
+        JarvisCommandBridge._validate_args(command, args)
+        if command in JarvisCommandBridge._CLEANUP_EMPTY_PREVIEW | JarvisCommandBridge._CLEANUP_DUPLICATE_PREVIEW:
+            return self._cleanup_preview(command, args)
+        if command in JarvisCommandBridge._CLEANUP_EMPTY_DELETE:
+            return self._post("/api/files/empty/delete", {
+                "file_id": args.get("file_id"), "confirm": args.get("confirm", False),
+            })
+        if command in JarvisCommandBridge._CLEANUP_DUPLICATE_DELETE:
+            return self._post("/api/files/duplicates/delete", {
+                "file_id": args.get("file_id"), "confirm": args.get("confirm", False),
+            })
         if command == "discover_folders":
             return self._get("/api/files/known-folders")
         if command == "approved_folders":
@@ -173,46 +304,21 @@ class JarvisHttpClient:
                 query_string += "&" + urlencode({"root_id": args["root_id"]})
             return self._get("/api/files/search?" + query_string)
         if command == "sort_preview":
-            root_id = args.get("root_id")
-            if root_id is None:
-                known_id = args.get("known_folder")
-                if known_id:
-                    folders = self._get("/api/files/known-folders")["folders"]
-                    match = next((folder for folder in folders if folder["id"] == known_id.casefold()), None)
-                    if not match:
-                        raise ValueError("Known folder is unavailable; refresh discovery")
-                    args["path"] = match["path"]
-                if args.get("path"):
-                    roots = self._get("/api/files/state")["roots"]
-                    path = str(Path(args["path"]).resolve(strict=False)).casefold()
-                    existing = next((root for root in roots if str(Path(root["path"]).resolve(strict=False)).casefold() == path), None)
-                    if existing:
-                        root_id = existing["id"]
-                    else:
-                        added = self._post("/api/files/roots/add", {"path": args["path"], "label": args.get("label", Path(args["path"]).name), "consent": True})
-                        root_id = added["id"]
-                        deadline = time.monotonic() + 60
-                        while time.monotonic() < deadline:
-                            root = next((root for root in self._get("/api/files/state")["roots"] if root["id"] == root_id), None)
-                            if root is None:
-                                raise ValueError("Approved root disappeared")
-                            if root["status"] != "scanning":
-                                if root["status"] != "ready":
-                                    raise ValueError(f"Folder scan ended with status {root['status']}")
-                                break
-                            time.sleep(.1)
-                if root_id is None:
-                    raise ValueError("Provide root_id, path, or known_folder")
+            root_id = self._resolve_remote_root(args)
             return self._post("/api/files/sort/preview", {"root_id": root_id, "create_folders": _require_bool(args.get("create_folders", False), "create_folders")})
         if command == "sort_apply":
-            if _require_bool(args.get("confirm", False), "confirm") is not True:
-                raise ValueError("sort_apply requires confirm=true after reviewing the preview")
             return self._post("/api/files/sort/apply", {"plan_id": args.get("plan_id")})
         if command == "sort_undo":
-            if _require_bool(args.get("confirm", False), "confirm") is not True:
-                raise ValueError("sort_undo requires confirm=true")
             return self._post("/api/files/sort/undo", {"plan_id": args.get("plan_id")})
         raise ValueError("Unknown Jarvis command")
+
+    def _post(self, path: str, body: dict) -> dict:
+        request = Request(self.base_url + path, data=json.dumps(body).encode("utf-8"), method="POST", headers={
+            "Content-Type": "application/json",
+            "Origin": self.base_url,
+            "X-Kshetrajna-Token": self.token,
+        })
+        return self._request(request)
 
 
 def serve_jsonl(bridge, input_stream=None, output_stream=None) -> int:
@@ -249,37 +355,62 @@ def _build_local_bridge(data_dir: Path | None, demo: bool):
 
 
 def main(argv=None, default_command=None) -> int:
-    parser = argparse.ArgumentParser(description="Kshetrajna loopback/Jarvis command bridge")
+    parser = argparse.ArgumentParser(
+        description="Reviewed Sort AI and cleanup commands, locally or through the loopback dashboard.",
+        epilog=("Preview first: empty_preview and duplicate_preview only list candidates. "
+                "Cleanup deletion is permanent and requires --file-id ID --confirm. "
+                "A preview with --path or --known-folder approves and scans that folder. "
+                "With kshetrajna-sort (python -m kshetrajna.cli), use cleanup empty|duplicates "
+                "or sort preview|apply|undo; sort options alone default to sort_preview, "
+                "cleanup options alone to empty_preview. Use --jsonl explicitly for JSON-lines input."))
     parser.add_argument("command", nargs="?", default=default_command,
-                        choices=("discover_folders", "approved_folders", "file_search", "sort_preview", "sort_apply", "sort_undo"))
+                        choices=(
+                            "discover_folders", "approved_folders", "file_search",
+                            "sort_preview", "sort_apply", "sort_undo",
+                            *sorted(JarvisCommandBridge._CLEANUP_EMPTY_PREVIEW
+                                    | JarvisCommandBridge._CLEANUP_DUPLICATE_PREVIEW
+                                    | JarvisCommandBridge._CLEANUP_EMPTY_DELETE
+                                    | JarvisCommandBridge._CLEANUP_DUPLICATE_DELETE),
+                        ))
     parser.add_argument("--url", help="Running loopback dashboard URL, for example http://127.0.0.1:8765")
     parser.add_argument("--data-dir", type=Path)
     parser.add_argument("--demo", action="store_true")
     parser.add_argument("--jsonl", action="store_true", help="Read newline-delimited JSON commands from stdin")
-    parser.add_argument("--path")
-    parser.add_argument("--known-folder")
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument("--path", help="Approve and scan a folder for a preview")
+    scope.add_argument("--known-folder", help="Discovered folder ID to approve and scan")
+    scope.add_argument("--root-id", type=_cli_positive_id, help="Positive approved root ID; omit for cleanup across approved roots")
     parser.add_argument("--label")
-    parser.add_argument("--root-id", type=int)
     parser.add_argument("--query")
     parser.add_argument("--plan-id")
+    parser.add_argument("--file-id", type=_cli_positive_id, help="Positive file ID returned by a cleanup preview")
     parser.add_argument("--create-folders", action="store_true")
-    parser.add_argument("--confirm", action="store_true", help="Required for apply and undo")
+    parser.add_argument("--confirm", action="store_true", help="Required for apply, undo, and cleanup deletion")
     args = parser.parse_args(argv)
-    if args.url and args.demo:
+    if args.url is not None and args.demo:
         parser.error("Choose --url or --demo, not both")
-    if args.url:
-        bridge, temporary = JarvisHttpClient(args.url), None
-    else:
-        bridge, temporary = _build_local_bridge(args.data_dir, args.demo)
+    if args.command is None and not args.jsonl:
+        parser.print_help()
+        return 0
+    temporary = None
     try:
-        if args.jsonl or args.command is None:
-            return serve_jsonl(bridge)
         payload = {key: value for key, value in vars(args).items()
-                   if key in {"path", "known_folder", "label", "root_id", "query", "plan_id", "create_folders", "confirm"} and value is not None}
+                   if key in {"path", "known_folder", "label", "root_id", "query", "plan_id", "file_id", "create_folders", "confirm"} and value is not None}
+        if not args.jsonl:
+            JarvisCommandBridge._validate_args(args.command, payload)
+        if args.url is not None:
+            bridge = JarvisHttpClient(args.url)
+        else:
+            bridge, temporary = _build_local_bridge(args.data_dir, args.demo)
+        if args.jsonl:
+            return serve_jsonl(bridge)
         print(json.dumps({"ok": True, "result": bridge.execute(args.command, **payload), "command": args.command}, indent=2))
         return 0
-    except (ValueError, OSError) as error:
+    except ValueError as error:
         print(json.dumps({"ok": False, "error": str(error)}))
+        return 2
+    except (OSError, HTTPException, TypeError, KeyError):
+        print(json.dumps({"ok": False, "error": "Command could not be completed; check the dashboard, paths, and permissions"}))
         return 2
     finally:
         if temporary:

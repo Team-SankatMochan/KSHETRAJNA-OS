@@ -6,6 +6,7 @@ import time
 import uuid
 import hashlib
 from datetime import datetime, timezone, timedelta
+import pathlib
 from pathlib import Path, PureWindowsPath
 import logging
 
@@ -13,8 +14,8 @@ from .file_storage import FileStore
 from .file_scanner import (walk, extract_excerpt, extract_office_excerpt, TEXT_EXTENSIONS,
                            ScanTruncated,
                            is_sensitive_file, INSPECTION_VERSION)
-from .file_insights import generate_insights, analyze_catalog, OFFICE_EXTENSIONS
-from .file_actions import FileActionManager
+from .file_insights import generate_insights, analyze_catalog, OFFICE_EXTENSIONS, PROJECT_MARKERS
+from .file_actions import FileActionManager, PROTECTED_ACTION_NAMES
 from .sort_ai import build_suggestions, automation_eligible
 from .organization import organization_plan, folder_inventory
 from .image_preview import IMAGE_EXTENSIONS, MAX_IMAGE_BYTES, inspect_image
@@ -56,7 +57,7 @@ class FileService:
 
     @staticmethod
     def _positive_id(value, name: str) -> int:
-        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 < value <= 2**63 - 1:
             raise ValueError(f"Invalid {name}")
         return value
 
@@ -1143,9 +1144,11 @@ class FileService:
             self._assert_no_scan(destination_root_id)
         return self.action_manager.create_proposal(file_id, kind, destination_relative, mode, destination_root_id=destination_root_id)
 
-    def apply_action(self, proposal_id: str) -> dict:
+    def apply_action(self, proposal_id: str, *, confirm=False) -> dict:
         action = self.store.get_file_action(proposal_id=proposal_id)
         if action:
+            if action.get("kind") == "DELETE" and confirm is not True:
+                raise ValueError("Deleting a file requires confirm=true")
             self._assert_no_scan(action["root_id"])
             self._assert_no_scan(action.get('destination_root_id') or action['root_id'])
         with self._gate:
@@ -1164,3 +1167,372 @@ class FileService:
 
     def get_action_journal(self) -> list[dict]:
         return self.action_manager.get_journal()
+
+
+    # --- Empty-file operations ---
+
+    # Structural and project-control names share the file-action protection list.
+    _PROTECTED_CLEANUP_NAMES = PROTECTED_ACTION_NAMES
+
+    def _cleanup_name_is_protected(self, file: dict) -> bool:
+        """Return whether a catalog row is never eligible for cleanup."""
+        return (
+            file.get("name", "").casefold() in self._PROTECTED_CLEANUP_NAMES
+            or is_sensitive_file(file.get("name", ""), file.get("extension", ""), file.get("relative_path", ""))
+        )
+
+    def _cleanup_project_directories(self, root_id: int | None = None) -> dict[int, set[str]]:
+        """Return project-tree roots whose contents must stay together."""
+        params: tuple = ()
+        root_filter = ""
+        if root_id is not None:
+            root_filter = " AND f.root_id=?"
+            params = (root_id,)
+        marker_names = tuple(marker.casefold() for marker in PROJECT_MARKERS)
+        placeholders = ",".join("?" for _ in marker_names)
+        with self.store._connect() as db:
+            rows = db.execute(
+                "SELECT f.root_id, f.relative_path FROM files f "
+                "JOIN roots r ON r.id=f.root_id "
+                "JOIN scan_state s ON s.root_id=f.root_id "
+                "WHERE r.status IN ('ready','truncated') AND f.scan_pass=s.last_pass "
+                f"AND lower(f.name) IN ({placeholders}){root_filter}",
+                (*marker_names, *params),
+            ).fetchall()
+        project_dirs: dict[int, set[str]] = {}
+        for row in rows:
+            relative = str(row["relative_path"]).replace("\\", "/")
+            parent = pathlib.PurePosixPath(relative).parent.as_posix()
+            project_dirs.setdefault(row["root_id"], set()).add("" if parent == "." else parent.casefold())
+        return project_dirs
+
+    @staticmethod
+    def _cleanup_file_is_in_project(file: dict, project_dirs: dict[int, set[str]]) -> bool:
+        relative = str(file.get("relative_path", "")).replace("\\", "/").casefold()
+        return any(not directory or relative == directory or relative.startswith(directory + "/")
+                   for directory in project_dirs.get(file.get("root_id"), set()))
+
+    def _cleanup_file_snapshot(self, file: dict, *, expected_size: int | None = None) -> tuple[Path, os.stat_result] | None:
+        """Validate a catalog row against the current approved filesystem.
+
+        Cleanup never follows a link and never treats a stale catalog row as a
+        deletion target.  ``None`` is returned for an unavailable/stale row so
+        list endpoints remain deterministic while delete endpoints can provide
+        a specific conflict error.
+        """
+        root = self.store.get_root(file["root_id"])
+        if not root or root.get("status") not in ("ready", "truncated"):
+            return None
+        root_path = pathlib.Path(root["path"])
+        full_path = root_path / file["relative_path"]
+        with self.store._connect() as db:
+            current = db.execute(
+                "SELECT f.scan_pass, s.last_pass FROM files f JOIN scan_state s ON s.root_id=f.root_id WHERE f.id=?",
+                (file.get("id"),),
+            ).fetchone()
+        if not current or current["scan_pass"] != current["last_pass"]:
+            return None
+        try:
+            self.action_manager._validate_path_safety(root_path, full_path)
+            info = full_path.stat(follow_symlinks=False)
+        except (OSError, ValueError):
+            return None
+        if not stat.S_ISREG(info.st_mode) or full_path.is_symlink():
+            return None
+        if getattr(info, "st_file_attributes", 0) & 0x400:
+            return None
+        if expected_size is not None and info.st_size != expected_size:
+            return None
+        return full_path, info
+
+    def _require_cleanup_root(self, root_id: int | None) -> None:
+        if root_id is None:
+            return
+        root = self.store.get_root(root_id)
+        if not root:
+            raise ValueError("Root not found")
+        if root.get("status") not in ("ready", "truncated"):
+            raise ValueError("Root is not ready for cleanup; finish or rescan it first")
+
+    def get_empty_files(self, root_id=None):
+        """Return current zero-byte regular files excluding protected markers."""
+        if root_id is not None:
+            root_id = self._positive_id(root_id, "root_id")
+        self._require_cleanup_root(root_id)
+        if self.demo:
+            # Demo catalog records are synthetic; never inspect their paths.
+            return {"empty_files": [], "total": 0, "scan_partial": False,
+                    "candidate_limit": self._CLEANUP_QUERY_LIMIT}
+        with self._gate:
+            project_dirs = self._cleanup_project_directories(root_id)
+            with self.store._connect() as db:
+                if root_id is not None:
+                    rows = db.execute(
+                        "SELECT f.id, f.root_id, f.relative_path, f.name, f.extension,"
+                        " f.size_bytes, f.modified_at, r.path as root_path, r.label as root_label"
+                        " FROM files f JOIN roots r ON f.root_id=r.id JOIN scan_state s ON s.root_id=f.root_id"
+                        " WHERE f.root_id=? AND f.scan_pass=s.last_pass AND f.size_bytes=0 AND f.is_directory=0"
+                        " ORDER BY f.root_id, f.relative_path LIMIT ?",
+                        (root_id, self._CLEANUP_QUERY_LIMIT + 1),
+                    ).fetchall()
+                else:
+                    rows = db.execute(
+                        "SELECT f.id, f.root_id, f.relative_path, f.name, f.extension,"
+                        " f.size_bytes, f.modified_at, r.path as root_path, r.label as root_label"
+                        " FROM files f JOIN roots r ON f.root_id=r.id JOIN scan_state s ON s.root_id=f.root_id"
+                        " WHERE f.scan_pass=s.last_pass AND f.size_bytes=0 AND f.is_directory=0"
+                        " ORDER BY f.root_id, f.relative_path LIMIT ?",
+                        (self._CLEANUP_QUERY_LIMIT + 1,),
+                    ).fetchall()
+            scan_partial = len(rows) > self._CLEANUP_QUERY_LIMIT
+            rows = rows[:self._CLEANUP_QUERY_LIMIT]
+            files = []
+            for row in rows:
+                d = dict(row)
+                if (self._cleanup_name_is_protected(d)
+                        or self._cleanup_file_is_in_project(d, project_dirs)):
+                    continue
+                snapshot = self._cleanup_file_snapshot(d, expected_size=0)
+                if snapshot is None:
+                    continue
+                d["path"] = str(pathlib.Path(d["root_path"]) / d["relative_path"])
+                files.append(d)
+            return {"empty_files": files, "total": len(files), "scan_partial": scan_partial,
+                    "candidate_limit": self._CLEANUP_QUERY_LIMIT}
+
+    def delete_empty_file(self, file_id, *, confirm=False):
+        """Permanently delete a confirmed-empty file through the action journal."""
+        if confirm is not True:
+            raise ValueError("Deleting an empty file requires confirm=true")
+        file_id = self._positive_id(file_id, "file_id")
+        if self.demo:
+            raise ValueError("File deletion is not available in demo mode")
+        with self._gate:
+            file = self.store.get_file(file_id)
+            if not file:
+                raise ValueError("File not found")
+            if file["is_directory"]:
+                raise ValueError("Cannot delete a directory with this endpoint")
+            if self._cleanup_name_is_protected(file):
+                if is_sensitive_file(file["name"], file["extension"], file["relative_path"]):
+                    raise ValueError("This file is a protected sensitive file")
+                raise ValueError("This file is a protected structural or project marker")
+            if self._cleanup_file_is_in_project(
+                    file, self._cleanup_project_directories(file["root_id"])):
+                raise ValueError("This file is inside a protected project tree")
+            root = self.store.get_root(file["root_id"])
+            if not root or root.get("status") == "removed":
+                raise ValueError("Root not found")
+            full_path = pathlib.Path(root["path"]) / file["relative_path"]
+            try:
+                self.action_manager._validate_path_safety(pathlib.Path(root["path"]), full_path)
+            except OSError as error:
+                raise ValueError("Approved root is unavailable") from error
+            except ValueError:
+                raise
+            snapshot = self._cleanup_file_snapshot(file)
+            if snapshot is None:
+                raise ValueError("File is missing, not a regular file, or is a symlink/reparse point")
+            full_path, info = snapshot
+            if info.st_size != 0:
+                raise ValueError(
+                    f"File is no longer empty (size is {info.st_size} bytes); rescan before deleting"
+                )
+            self._assert_no_scan(file["root_id"])
+            digest = self._file_sha256(full_path, expected_size=0)
+            if digest is None:
+                raise ValueError("File changed while validating its content; rescan before deleting")
+            action = self.action_manager.create_proposal(
+                file_id, "DELETE", file["relative_path"], "live", expected_sha256=digest
+            )
+            result = self.action_manager.apply_action(action["proposal_id"])
+            return {"deleted": result.get("status") in ("applied", "deleted"), "action": result}
+
+    # --- Duplicate-file operations ---
+
+    _HASH_CHUNK = 65536  # 64 KiB read chunks
+    _MAX_HASH_BYTES = 100 * 1024 * 1024
+    _CLEANUP_QUERY_LIMIT = 100000  # bounded local catalog work per preview
+
+    @staticmethod
+    def _file_sha256(path, *, expected_size=None):
+        """Return SHA-256 only when a bounded, stable regular file was read."""
+        h = hashlib.sha256()
+        descriptor = None
+        try:
+            flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(path, flags)
+            with os.fdopen(descriptor, "rb") as stream:
+                descriptor = None
+                before = os.fstat(stream.fileno())
+                if not stat.S_ISREG(before.st_mode) or before.st_size > FileService._MAX_HASH_BYTES:
+                    return None
+                if expected_size is not None and before.st_size != expected_size:
+                    return None
+                total = 0
+                while chunk := stream.read(FileService._HASH_CHUNK):
+                    total += len(chunk)
+                    if total > FileService._MAX_HASH_BYTES:
+                        return None
+                    h.update(chunk)
+                after = os.fstat(stream.fileno())
+                if ((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+                        != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)):
+                    return None
+                return h.hexdigest()
+        except (OSError, ValueError):
+            return None
+        finally:
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+
+    def get_duplicate_groups(self, root_id=None, *, size_min=1):
+        """Find sets of files with identical SHA-256 digests.
+
+        Groups are sorted by wasted bytes (largest first). Only non-empty,
+        non-directory files are examined. Catalog work is bounded by
+        ``_CLEANUP_QUERY_LIMIT`` and reports when that bound is reached.
+        """
+        if root_id is not None:
+            root_id = self._positive_id(root_id, "root_id")
+        self._require_cleanup_root(root_id)
+        if self.demo:
+            return {"groups": [], "total_groups": 0, "total_wasted_bytes": 0,
+                    "scan_partial": False, "scanned_files": 0,
+                    "hash_limit_bytes": self._MAX_HASH_BYTES}
+        with self._gate:
+            project_dirs = self._cleanup_project_directories(root_id)
+            with self.store._connect() as db:
+                if root_id is not None:
+                    rows = db.execute(
+                        "SELECT f.id, f.root_id, f.relative_path, f.name, f.extension,"
+                        " f.size_bytes, f.modified_at, r.path as root_path, r.label as root_label"
+                        " FROM files f JOIN roots r ON f.root_id=r.id JOIN scan_state s ON s.root_id=f.root_id"
+                        " WHERE f.root_id=? AND f.scan_pass=s.last_pass AND f.size_bytes>=? AND f.is_directory=0"
+                        " ORDER BY f.size_bytes DESC, f.root_id, f.relative_path LIMIT ?",
+                        (root_id, size_min, self._CLEANUP_QUERY_LIMIT + 1),
+                    ).fetchall()
+                else:
+                    rows = db.execute(
+                        "SELECT f.id, f.root_id, f.relative_path, f.name, f.extension,"
+                        " f.size_bytes, f.modified_at, r.path as root_path, r.label as root_label"
+                        " FROM files f JOIN roots r ON f.root_id=r.id JOIN scan_state s ON s.root_id=f.root_id"
+                        " WHERE f.scan_pass=s.last_pass AND f.size_bytes>=? AND f.is_directory=0"
+                        " ORDER BY f.size_bytes DESC, f.root_id, f.relative_path LIMIT ?",
+                        (size_min, self._CLEANUP_QUERY_LIMIT + 1),
+                    ).fetchall()
+            scan_partial = len(rows) > self._CLEANUP_QUERY_LIMIT
+            rows = rows[:self._CLEANUP_QUERY_LIMIT]
+        # First pass uses the live size, not stale catalog metadata.  A file
+        # changing during this stat/hash cycle is discarded rather than being
+        # treated as an exact duplicate on old evidence.
+        by_size = {}
+        skipped = 0
+        for row in rows:
+            d = dict(row)
+            if (self._cleanup_name_is_protected(d)
+                    or self._cleanup_file_is_in_project(d, project_dirs)):
+                skipped += 1
+                continue
+            snapshot = self._cleanup_file_snapshot(d)
+            if snapshot is None:
+                skipped += 1
+                continue
+            full_path, info = snapshot
+            if info.st_size < size_min or info.st_size == 0:
+                skipped += 1
+                continue
+            d["size_bytes"] = info.st_size
+            d["path"] = str(full_path)
+            by_size.setdefault(info.st_size, []).append(d)
+        # Second pass: hash only size-collision candidates
+        by_hash = {}
+        hash_skipped = 0
+        for size, candidates in by_size.items():
+            if len(candidates) < 2:
+                continue
+            for d in candidates:
+                full_path = pathlib.Path(d["root_path"]) / d["relative_path"]
+                digest = self._file_sha256(full_path, expected_size=size)
+                if digest is None:
+                    skipped += 1
+                    hash_skipped += 1
+                    continue
+                d["sha256"] = digest
+                by_hash.setdefault(digest, []).append(d)
+        # Collect groups with >= 2 members
+        groups = []
+        total_wasted = 0
+        for digest, members in by_hash.items():
+            if len(members) < 2:
+                continue
+            size = members[0]["size_bytes"]
+            wasted = size * (len(members) - 1)
+            total_wasted += wasted
+            groups.append({
+                "sha256": digest,
+                "size_bytes": size,
+                "count": len(members),
+                "wasted_bytes": wasted,
+                "files": members,
+            })
+        groups.sort(key=lambda g: (-g["wasted_bytes"], g["sha256"]))
+        return {
+            "groups": groups[:100],
+            "total_groups": len(groups),
+            "groups_returned": min(len(groups), 100),
+            "groups_truncated": len(groups) > 100,
+            "total_wasted_bytes": total_wasted,
+            "scan_partial": scan_partial,
+            "scanned_files": len(rows),
+            "hash_limit_bytes": self._MAX_HASH_BYTES,
+            "skipped_files": skipped,
+            "hash_skipped_files": hash_skipped,
+        }
+
+    def delete_duplicate_file(self, file_id, *, confirm=False):
+        """Permanently delete one copy from a duplicate group through the journal.
+
+        A live matching peer must survive the journal's final content recheck.
+        """
+        if confirm is not True:
+            raise ValueError("Deleting a duplicate requires confirm=true")
+        file_id = self._positive_id(file_id, "file_id")
+        if self.demo:
+            raise ValueError("File deletion is not available in demo mode")
+        with self._gate:
+            file = self.store.get_file(file_id)
+            if not file:
+                raise ValueError("File not found")
+            if file["is_directory"]:
+                raise ValueError("Cannot delete a directory")
+            if self._cleanup_name_is_protected(file):
+                if is_sensitive_file(file["name"], file["extension"], file["relative_path"]):
+                    raise ValueError("This file is a protected sensitive file")
+                raise ValueError("This file is a protected structural or project marker")
+            if self._cleanup_file_is_in_project(
+                    file, self._cleanup_project_directories(file["root_id"])):
+                raise ValueError("This file is inside a protected project tree")
+            root = self.store.get_root(file["root_id"])
+            if not root or root.get("status") == "removed":
+                raise ValueError("Root not found")
+            self._assert_no_scan(file["root_id"])
+            # Rebuild the exact current group immediately before journaling.
+            # This both protects the last survivor and avoids trusting a stale
+            # duplicate preview.
+            groups = self.get_duplicate_groups()
+            group = next((candidate for candidate in groups["groups"]
+                          if any(member["id"] == file_id for member in candidate["files"])), None)
+            if not group or len(group["files"]) < 2:
+                raise ValueError("No duplicate copy remains; refusing to delete the last survivor")
+            digest = group["sha256"]
+            peer_ids = [peer["id"] for peer in group["files"] if peer["id"] != file_id]
+            action = self.action_manager.create_proposal(
+                file_id, "DELETE", file["relative_path"], "live",
+                expected_sha256=digest, expected_peer_ids=peer_ids,
+            )
+            result = self.action_manager.apply_action(action["proposal_id"])
+            return {"deleted": result.get("status") in ("applied", "deleted"), "action": result}

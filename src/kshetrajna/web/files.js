@@ -1028,7 +1028,7 @@ $('add-root-form').addEventListener('submit', async (e) => {
 
 $('delete-files-button').addEventListener('click', async () => {
   if (confirm('Delete all file intelligence data? This will not delete original files.')) {
-    await mutateFile('/api/files/delete-all', {}, 'All file data deleted.');
+    await mutateFile('/api/files/delete-all', {confirm: true}, 'All file data deleted.');
   }
 });
 
@@ -1165,6 +1165,7 @@ async function proposeFileAction(file, kind) {
       file_id: file.id,
       kind,
       destination: trimmed,
+      ...(kind === 'DELETE' ? {confirm: true} : {}),
     });
     const description = `${proposal.source_relative} → ${proposal.destination_relative}`;
     if (kind !== 'DELETE' && !window.confirm(`Review ${kind.toLowerCase()} proposal:\n${description}\n\nApply this file action?`)) {
@@ -1173,7 +1174,10 @@ async function proposeFileAction(file, kind) {
       await refreshFiles();
       return;
     }
-    const result = await post('/api/files/actions/apply', { proposal_id: proposal.proposal_id });
+    const result = await post('/api/files/actions/apply', {
+      proposal_id: proposal.proposal_id,
+      ...(kind === 'DELETE' ? {confirm: true} : {}),
+    });
     if (result.status !== (kind === 'DELETE' ? 'deleted' : 'applied')) throw new Error(result.message || 'The file action did not complete.');
     setFeedback(kind === 'DELETE' ? 'File deleted permanently and recorded.' : `${kind === 'RENAME' ? 'Rename' : 'Move'} applied and recorded.`);
     await refreshFiles();
@@ -1203,7 +1207,10 @@ function renderActionJournal(actions) {
       controls.append(
         button('Apply', async () => {
           try {
-            const result = await post('/api/files/actions/apply', { proposal_id: action.proposal_id });
+            const result = await post('/api/files/actions/apply', {
+              proposal_id: action.proposal_id,
+              ...(action.kind === 'DELETE' ? {confirm: true} : {}),
+            });
             const expected = action.kind === 'DELETE' ? 'deleted' : 'applied';
             if (result.status !== expected) throw new Error(result.message || 'The file action did not complete.');
             setFeedback(action.kind === 'DELETE' ? 'File deleted permanently and recorded.' : 'File action applied and recorded.');
@@ -1238,3 +1245,457 @@ function renderActionJournal(actions) {
 // Initial load
 refreshFiles();
 setInterval(refreshFiles, 5000);
+
+
+/* ======================================================
+   CLEANUP PANEL – scope, evidence, and reviewed deletion
+   ====================================================== */
+
+let cleanupBusy = false;
+let cleanupData = {empty: null, duplicates: null};
+let pendingCleanupApproval = null;
+let cleanupApprovalReturnFocus = null;
+let cleanupStateWasScanning = false;
+
+function fmtBytes(n) {
+  const size = Number(n);
+  if (!Number.isFinite(size) || size < 0) return 'Unknown size';
+  if (size === 0) return '0 B';
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  const index = Math.min(Math.floor(Math.log(size) / Math.log(1024)), units.length - 1);
+  return `${(size / (1024 ** index)).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+function cleanupScopeInfo() {
+  const roots = currentFilesState?.roots || [];
+  const selected = $('cleanup-scope')?.value || 'all';
+  const selectedRoot = selected === 'all' ? null : roots.find(root => String(root.id) === String(selected));
+  const scopedRoots = selectedRoot ? [selectedRoot] : roots;
+  const indexedFiles = scopedRoots.reduce((total, root) => total + Number(root.file_count || 0), 0);
+  const paths = scopedRoots.map(root => root.path).filter(Boolean);
+  return {
+    selected,
+    selectedRoot,
+    roots: scopedRoots,
+    paths,
+    indexedFiles,
+    scanning: scopedRoots.some(root => ['pending', 'scanning'].includes(root.status)),
+    globalScanning: roots.some(root => ['pending', 'scanning'].includes(root.status)),
+    partial: scopedRoots.some(root => root.status === 'truncated'),
+    errors: scopedRoots.filter(root => root.status === 'error'),
+    ready: scopedRoots.some(root => ['ready', 'truncated'].includes(root.status)),
+  };
+}
+
+function cleanupScopeLabel(info = cleanupScopeInfo()) {
+  if (info.selectedRoot) return info.selectedRoot.label || info.selectedRoot.path || 'Approved location';
+  return 'All approved locations';
+}
+
+function cleanupScopePath(info = cleanupScopeInfo()) {
+  if (info.selectedRoot) return info.selectedRoot.path || 'Path unavailable';
+  if (!info.paths.length) return 'Waiting for an approved, indexed location.';
+  return info.paths.join(' · ');
+}
+
+function cleanupScopeStatus(info = cleanupScopeInfo()) {
+  if (!currentFilesState || !info.roots.length) return ['empty', 'No approved indexed locations yet.'];
+  if (info.scanning || info.globalScanning) return ['scanning', 'A file scan is active. Cleanup controls stay disabled until it finishes.'];
+  if (!info.ready) return ['error', 'This scope has no completed scan. Review the File library and scan again.'];
+  if (info.errors.length && info.partial) return ['partial', 'Partial scope: some locations reached a scan limit and others need attention.'];
+  if (info.errors.length) return ['partial', `${info.errors.length} approved location${info.errors.length === 1 ? '' : 's'} could not finish. Results are not complete.`];
+  if (info.partial) return ['partial', 'Partial scope: a scan limit was reached. Results cover the indexed subset only.'];
+  return ['ready', 'Scope is ready. Results cover the indexed files shown above.'];
+}
+
+function cleanupEndpoint(kind) {
+  const selected = $('cleanup-scope')?.value || 'all';
+  return selected === 'all' ? `/api/files/${kind}` : `/api/files/${kind}?root_id=${encodeURIComponent(selected)}`;
+}
+
+function cleanupExactPath(file) {
+  if (file.path) return file.path;
+  const root = String(file.root_path || '').replace(/[\\/]+$/, '');
+  const separator = root.includes('\\') ? '\\' : '/';
+  return root && file.relative_path ? `${root}${separator}${file.relative_path.split(/[\\/]/).join(separator)}` : (file.relative_path || file.name || 'Path unavailable');
+}
+
+function setCleanupFeedback(message, error = false) {
+  const feedback = $('cleanup-feedback');
+  if (feedback) {
+    feedback.textContent = message || '';
+    feedback.style.color = error ? '#ffb4ad' : '';
+  }
+  // Keep the app-level toast useful without claiming a result the cleanup
+  // endpoint did not provide.
+  if (message && typeof setFeedback === 'function') setFeedback(message, error);
+}
+
+function renderCleanupScopeOptions() {
+  const select = $('cleanup-scope');
+  if (!select) return;
+  const current = select.value || 'all';
+  const roots = (currentFilesState?.roots || []).filter(root => ['ready', 'truncated'].includes(root.status));
+  const options = [['All approved locations', 'all'], ...roots.map(root => [
+    `${root.label || 'Approved location'} · ${root.path || 'path unavailable'}`,
+    String(root.id),
+  ])];
+  const signature = JSON.stringify(options);
+  if (select.dataset.options !== signature) {
+    select.replaceChildren(...options.map(([label, value]) => new Option(label, value)));
+    select.dataset.options = signature;
+  }
+  select.value = options.some(([, value]) => value === current) ? current : 'all';
+}
+
+function renderCleanupSummary() {
+  const summary = $('cleanup-summary');
+  if (!summary) return;
+  const info = cleanupScopeInfo();
+  const [state, stateCopy] = cleanupScopeStatus(info);
+  const emptyCount = cleanupData.empty ? Number(cleanupData.empty.total ?? cleanupData.empty.empty_files?.length ?? 0) : '—';
+  const duplicateGroups = cleanupData.duplicates ? Number(cleanupData.duplicates.total_groups || 0) : '—';
+  const duplicateCopies = cleanupData.duplicates
+    ? (cleanupData.duplicates.groups || []).reduce((total, group) => total + Number(group.count || group.files?.length || 0), 0)
+    : '—';
+  const wasted = cleanupData.duplicates ? fmtBytes(cleanupData.duplicates.total_wasted_bytes || 0) : '—';
+  summary.replaceChildren();
+  for (const [value, label, className] of [
+    [info.indexedFiles.toLocaleString(), 'indexed files in scope', 'cleanup-indexed'],
+    [String(emptyCount), 'zero-byte candidates', 'cleanup-candidate'],
+    ['0 B', 'zero-byte bytes', 'cleanup-wasted'],
+    [String(duplicateGroups), 'exact duplicate groups', 'cleanup-candidate'],
+    [String(duplicateCopies), 'copies in returned groups', 'cleanup-candidate'],
+    [wasted, 'duplicate bytes wasted', 'cleanup-wasted'],
+  ]) {
+    const card = element('div', null, className);
+    card.append(element('strong', value), element('small', label));
+    summary.append(card);
+  }
+  const scopeLabel = $('cleanup-scope-label');
+  const scopePath = $('cleanup-scope-path');
+  if (scopeLabel) scopeLabel.textContent = cleanupScopeLabel(info);
+  if (scopePath) scopePath.textContent = cleanupScopePath(info);
+  const note = $('cleanup-scope-note');
+  if (note) {
+    note.dataset.state = state;
+    note.textContent = stateCopy;
+  }
+  const overallStatus = $('cleanup-scope-status');
+  if (overallStatus) {
+    overallStatus.dataset.state = state;
+    overallStatus.textContent = state === 'ready' ? 'READY TO SCAN' : state.replaceAll('_', ' ').toUpperCase();
+  }
+  for (const id of ['cleanup-empty-scope', 'cleanup-dup-scope']) {
+    const scope = $(id);
+    if (scope) scope.textContent = `Scope: ${cleanupScopeLabel(info)} · ${cleanupScopePath(info)}`;
+  }
+}
+
+function syncCleanupControls(state = currentFilesState) {
+  const roots = state?.roots || [];
+  const anyScanActive = roots.some(root => ['pending', 'scanning'].includes(root.status));
+  const info = cleanupScopeInfo();
+  const disabled = cleanupBusy || anyScanActive;
+  const scope = $('cleanup-scope');
+  if (scope) scope.disabled = disabled;
+  for (const id of ['cleanup-scan-empty', 'cleanup-scan-dup']) {
+    const control = $(id);
+    if (control) control.disabled = disabled || !info.ready;
+  }
+  document.querySelectorAll('#cleanup .cleanup-delete-button').forEach(control => {
+    control.disabled = disabled;
+  });
+}
+
+function cleanupLoading(list, message) {
+  list.replaceChildren(element('p', message, 'cleanup-loading'));
+  list.setAttribute('aria-busy', 'true');
+}
+
+function cleanupError(list, message) {
+  list.replaceChildren(element('p', message, 'cleanup-error'));
+  list.setAttribute('aria-busy', 'false');
+}
+
+function cleanupEmptyState(list, message) {
+  list.replaceChildren(element('p', message, 'cleanup-empty'));
+  list.setAttribute('aria-busy', 'false');
+}
+
+function cleanupOutcome(subject) {
+  return `${subject} deleted permanently. The action journal records the result for audit; Kshetrajna cannot undo this deletion.`;
+}
+
+function finishCleanupApproval(approved) {
+  const pending = pendingCleanupApproval;
+  pendingCleanupApproval = null;
+  const dialog = $('cleanup-confirm-dialog');
+  if (dialog?.open) dialog.close();
+  if (pending) pending(approved);
+  if (!approved) cleanupApprovalReturnFocus?.focus();
+}
+
+function requestCleanupApproval(kind, file, detail) {
+  const dialog = $('cleanup-confirm-dialog');
+  const path = cleanupExactPath(file);
+  cleanupApprovalReturnFocus = document.activeElement;
+  if (!dialog?.showModal) {
+    setCleanupFeedback('This browser cannot open the required in-app confirmation. No file was deleted.', true);
+    return Promise.resolve(false);
+  }
+  if (pendingCleanupApproval) finishCleanupApproval(false);
+  $('cleanup-confirm-title').textContent = kind === 'duplicate' ? 'Delete this duplicate copy?' : 'Delete this zero-byte file?';
+  $('cleanup-confirm-copy').textContent = detail;
+  $('cleanup-confirm-effect').replaceChildren(
+    element('strong', kind === 'duplicate' ? 'EXACT SHA-256 DUPLICATE' : 'ZERO-BYTE CANDIDATE', 'eyebrow'),
+    element('code', path),
+  );
+  $('cleanup-confirm-mode').textContent = 'Deletion is permanent and cannot be undone. The action journal records the result for audit only.';
+  dialog.showModal();
+  $('cleanup-confirm-cancel')?.focus();
+  return new Promise(resolve => { pendingCleanupApproval = resolve; });
+}
+
+async function fetchCleanupList(kind) {
+  return request(cleanupEndpoint(kind));
+}
+
+function cleanupStatusText(info, count, noun) {
+  const [state] = cleanupScopeStatus(info);
+  const suffix = state === 'partial' ? ' · PARTIAL SCOPE' : state === 'error' ? ' · ATTENTION' : '';
+  return `${Number(count).toLocaleString()} ${noun}${Number(count) === 1 ? '' : 's'}${suffix}`;
+}
+
+function renderEmptyList(files) {
+  const list = $('cleanup-empty-list');
+  list.replaceChildren();
+  list.setAttribute('aria-busy', 'false');
+  if (!Array.isArray(files) || !files.length) {
+    cleanupEmptyState(list, cleanupData.empty?.scan_partial
+      ? `The zero-byte pass reached its ${Number(cleanupData.empty.candidate_limit || 0).toLocaleString()}-candidate safety limit. Narrow the scope to inspect the remaining indexed files.`
+      : 'No zero-byte candidates found in this indexed scope. Protected structural markers were excluded.');
+    return;
+  }
+  for (const file of files) {
+    const entry = element('article', null, 'file-action-entry');
+    entry.dataset.kind = 'empty';
+    const path = cleanupExactPath(file);
+    entry.append(
+      element('span', 'ZERO-BYTE CANDIDATE', 'eyebrow'),
+      element('strong', file.name || file.relative_path || 'Unnamed file'),
+      element('small', `${file.relative_path || file.name || 'Relative path unavailable'} · ${fmtBytes(file.size_bytes || 0)}`),
+      element('code', path, 'cleanup-path'),
+      element('span', 'Size is exactly 0 bytes. This is not a duplicate match.', 'cleanup-evidence'),
+    );
+    const actions = element('div', null, 'control-actions');
+    const deleteButton = button('Review deletion', async () => {
+      await deleteCleanupFile('empty', file, entry, deleteButton);
+    }, 'danger cleanup-delete-button');
+    actions.append(deleteButton);
+    entry.append(actions);
+    list.append(entry);
+  }
+  if (cleanupData.empty?.scan_partial) {
+    list.prepend(element('p', `Showing the first ${Number(cleanupData.empty.candidate_limit || files.length).toLocaleString()} candidates. The catalog preview reached its safety limit; narrow the scope to inspect the rest.`, 'cleanup-warning'));
+  }
+  syncCleanupControls();
+}
+
+function renderDuplicateGroups(data) {
+  const list = $('cleanup-dup-list');
+  const summary = $('cleanup-dup-summary');
+  const groups = Array.isArray(data?.groups) ? data.groups : [];
+  list.replaceChildren();
+  list.setAttribute('aria-busy', 'false');
+  if (summary) {
+    summary.replaceChildren();
+    const copies = groups.reduce((total, group) => total + Number(group.count || group.files?.length || 0), 0);
+    const stats = element('div', null, 'sort-plan-stats');
+    stats.append(
+      element('span', `${Number(data?.total_groups || 0).toLocaleString()} exact SHA-256 group${Number(data?.total_groups || 0) === 1 ? '' : 's'}`, 'pill'),
+      element('span', `${copies.toLocaleString()} copies in returned groups`, 'pill'),
+      element('span', `${fmtBytes(data?.total_wasted_bytes || 0)} duplicate bytes`, 'pill'),
+      ...(data?.scan_partial ? [element('span', 'PARTIAL CATALOG PREVIEW', 'pill cleanup-warning')] : []),
+      ...(data?.hash_skipped_files ? [element('span', `${Number(data.hash_skipped_files).toLocaleString()} files not hashable in the bounded pass`, 'pill cleanup-warning')] : []),
+      ...(data?.groups_truncated ? [element('span', 'FIRST 100 GROUPS SHOWN', 'pill cleanup-warning')] : []),
+    );
+    summary.append(stats);
+  }
+  if (!groups.length) {
+    cleanupEmptyState(list, data?.hash_skipped_files
+      ? `No exact duplicate groups were returned from the hashable subset. ${Number(data.hash_skipped_files).toLocaleString()} equal-size candidate file(s) could not be hashed in the bounded pass; narrow the scope or review large/changed files separately.`
+      : 'No exact SHA-256 duplicate groups found in this indexed scope. Matching names or sizes alone are not reported as duplicates.');
+    return;
+  }
+  for (const group of groups) {
+    const groupElement = element('section', null, 'cleanup-group');
+    const heading = element('div', null, 'cleanup-group-heading');
+    const headingCopy = element('div');
+    headingCopy.append(
+      element('strong', `${Number(group.count || group.files?.length || 0).toLocaleString()} exact copies · ${fmtBytes(group.size_bytes)} each`),
+      element('small', `${fmtBytes(group.wasted_bytes)} duplicate bytes in this group`),
+    );
+    heading.append(headingCopy, element('span', 'SHA-256 VERIFIED'));
+    groupElement.append(heading, element('code', `SHA-256 ${group.sha256 || 'digest unavailable'}`, 'cleanup-hash'));
+    const files = Array.isArray(group.files) ? group.files : [];
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      const isKeep = index === files.length - 1;
+      const entry = element('article', null, 'file-action-entry');
+      entry.dataset.kind = 'duplicate';
+      const path = cleanupExactPath(file);
+      entry.append(
+        element('span', isKeep ? 'KEEP · LAST COPY IN THIS REVIEW' : 'EXACT SHA-256 DUPLICATE', `eyebrow${isKeep ? ' cleanup-keep' : ''}`),
+        element('strong', file.name || file.relative_path || 'Unnamed file'),
+        element('small', `${file.relative_path || file.name || 'Relative path unavailable'} · ${fmtBytes(file.size_bytes)}`),
+        element('code', path, 'cleanup-path'),
+      );
+      if (!isKeep) {
+        const actions = element('div', null, 'control-actions');
+        const deleteButton = button('Review deletion', async () => {
+          await deleteCleanupFile('duplicate', file, entry, deleteButton, group);
+        }, 'danger cleanup-delete-button');
+        actions.append(deleteButton);
+        entry.append(actions);
+      }
+      groupElement.append(entry);
+    }
+    list.append(groupElement);
+  }
+  if (data?.scan_partial) {
+    list.prepend(element('p', `The duplicate pass inspected ${Number(data.scanned_files || 0).toLocaleString()} indexed files and reached its safety limit. Narrow the scope to inspect more files. Files larger than ${fmtBytes(data.hash_limit_bytes || 0)} are not hashed by this bounded pass.`, 'cleanup-warning'));
+  }
+  syncCleanupControls();
+}
+
+async function refreshCleanupList(kind) {
+  const isEmpty = kind === 'empty';
+  const list = $(isEmpty ? 'cleanup-empty-list' : 'cleanup-dup-list');
+  const status = $(isEmpty ? 'cleanup-empty-status' : 'cleanup-dup-status');
+  const info = cleanupScopeInfo();
+  const data = await fetchCleanupList(isEmpty ? 'empty' : 'duplicates');
+  if (isEmpty) {
+    cleanupData.empty = data;
+    renderEmptyList(data.empty_files || []);
+    if (status) status.textContent = cleanupStatusText(info, data.total ?? data.empty_files?.length ?? 0, 'candidate') + (data.scan_partial ? ' · PARTIAL CATALOG' : '');
+  } else {
+    cleanupData.duplicates = data;
+    renderDuplicateGroups(data);
+    if (status) status.textContent = `${Number(data.total_groups || 0).toLocaleString()} group${Number(data.total_groups || 0) === 1 ? '' : 's'} · ${fmtBytes(data.total_wasted_bytes || 0)} wasted${cleanupScopeStatus(info)[0] === 'partial' || data.scan_partial ? ' · PARTIAL' : ''}`;
+  }
+  renderCleanupSummary();
+  return data;
+}
+
+async function scanCleanup(kind) {
+  if (cleanupBusy) return;
+  const info = cleanupScopeInfo();
+  if (!info.ready) {
+    setCleanupFeedback('Approve and finish a scan for at least one location before running cleanup.', true);
+    return;
+  }
+  cleanupBusy = true;
+  syncCleanupControls();
+  const isEmpty = kind === 'empty';
+  const list = $(isEmpty ? 'cleanup-empty-list' : 'cleanup-dup-list');
+  const status = $(isEmpty ? 'cleanup-empty-status' : 'cleanup-dup-status');
+  cleanupLoading(list, isEmpty ? 'Scanning the indexed scope for zero-byte candidates…' : 'Hashing equal-size candidates with SHA-256…');
+  if (status) status.textContent = isEmpty ? 'SCANNING…' : 'HASHING…';
+  setCleanupFeedback('');
+  try {
+    await refreshCleanupList(kind);
+    setCleanupFeedback(isEmpty ? 'Zero-byte scan complete. Review each exact path before deletion.' : 'Duplicate scan complete. Only identical SHA-256 content is grouped.');
+  } catch (error) {
+    cleanupError(list, `Cleanup scan failed: ${error.message}. No file was changed.`);
+    if (status) status.textContent = 'SCAN ERROR';
+    setCleanupFeedback(`Cleanup scan failed: ${error.message}.`, true);
+  } finally {
+    cleanupBusy = false;
+    syncCleanupControls();
+  }
+}
+
+async function deleteCleanupFile(kind, file, entry, deleteButton, group = null) {
+  if (cleanupBusy || pendingCleanupApproval || cleanupScopeInfo().scanning) return;
+  const approvalScope = $('cleanup-scope')?.value || 'all';
+  const path = cleanupExactPath(file);
+  const detail = kind === 'duplicate'
+    ? `Review this exact duplicate before deleting it. Another copy in this SHA-256 group will remain in this review.\n\n${path}\n\nHash: ${group?.sha256 || 'verified by the scan'}`
+    : `Review this zero-byte candidate before deleting it. Protected structural markers are excluded from this list.\n\n${path}\n\nRecorded size: 0 bytes`;
+  if (!await requestCleanupApproval(kind, file, detail)) return;
+  if (approvalScope !== ($('cleanup-scope')?.value || 'all') || cleanupScopeInfo().globalScanning) {
+    setCleanupFeedback('The cleanup scope changed or a scan started while approval was open. No file was deleted; scan the current scope again.', true);
+    return;
+  }
+  cleanupBusy = true;
+  if (deleteButton) deleteButton.disabled = true;
+  syncCleanupControls();
+  let result = null;
+  try {
+    const endpoint = kind === 'duplicate' ? '/api/files/duplicates/delete' : '/api/files/empty/delete';
+    result = await post(endpoint, {file_id: file.id, confirm: true});
+    if (!result.deleted) throw new Error(result.action?.message || result.message || 'The backend did not confirm deletion.');
+    await refreshFiles();
+    // Re-query the same scope after every mutation. This removes stale paths,
+    // re-evaluates duplicate groups, and makes a survivor visible again.
+    await refreshCleanupList(kind);
+    setCleanupFeedback(cleanupOutcome(kind === 'duplicate' ? 'Duplicate copy' : 'Zero-byte file'));
+  } catch (error) {
+    if (result?.deleted) {
+      setCleanupFeedback(`${cleanupOutcome(kind === 'duplicate' ? 'Duplicate copy' : 'Zero-byte file')} The list refresh needs attention: ${error.message}`, true);
+    } else {
+      setCleanupFeedback(`Delete failed: ${error.message}. No success was recorded.`, true);
+    }
+    if (entry) entry.classList.add('cleanup-delete-failed');
+  } finally {
+    cleanupBusy = false;
+    syncCleanupControls();
+  }
+}
+
+function resetCleanupResultsForScope() {
+  cleanupData = {empty: null, duplicates: null};
+  const info = cleanupScopeInfo();
+  const label = cleanupScopeLabel(info);
+  const emptyList = $('cleanup-empty-list');
+  const duplicateList = $('cleanup-dup-list');
+  if (emptyList) cleanupEmptyState(emptyList, `Scope changed to ${label}. Scan again for zero-byte candidates.`);
+  if (duplicateList) cleanupEmptyState(duplicateList, `Scope changed to ${label}. Scan again for exact SHA-256 duplicates.`);
+  if ($('cleanup-empty-status')) $('cleanup-empty-status').textContent = 'SCAN REQUIRED';
+  if ($('cleanup-dup-status')) $('cleanup-dup-status').textContent = 'SCAN REQUIRED';
+  if ($('cleanup-dup-summary')) $('cleanup-dup-summary').replaceChildren();
+  renderCleanupSummary();
+  setCleanupFeedback('Scope changed. Previous cleanup results were cleared; scan the new scope before reviewing actions.');
+  syncCleanupControls();
+}
+
+function renderCleanupFromFileState(state) {
+  const previousScope = $('cleanup-scope')?.value || 'all';
+  currentFilesState = state || currentFilesState;
+  renderCleanupScopeOptions();
+  const nextScope = $('cleanup-scope')?.value || 'all';
+  const nowScanning = (currentFilesState?.roots || []).some(root => ['pending', 'scanning'].includes(root.status));
+  if ((previousScope !== nextScope || (nowScanning && !cleanupStateWasScanning)) && (cleanupData.empty || cleanupData.duplicates)) {
+    resetCleanupResultsForScope();
+  }
+  cleanupStateWasScanning = nowScanning;
+  renderCleanupSummary();
+  syncCleanupControls(currentFilesState);
+}
+
+$('cleanup-scan-empty')?.addEventListener('click', () => scanCleanup('empty'));
+$('cleanup-scan-dup')?.addEventListener('click', () => scanCleanup('duplicates'));
+$('cleanup-scope')?.addEventListener('change', resetCleanupResultsForScope);
+$('cleanup-confirm-delete')?.addEventListener('click', () => finishCleanupApproval(true));
+$('cleanup-confirm-cancel')?.addEventListener('click', () => finishCleanupApproval(false));
+$('cleanup-confirm-dialog')?.addEventListener('cancel', event => {
+  event.preventDefault();
+  finishCleanupApproval(false);
+});
+$('cleanup-confirm-dialog')?.addEventListener('close', () => {
+  if (cleanupApprovalReturnFocus && document.body.contains(cleanupApprovalReturnFocus)) cleanupApprovalReturnFocus.focus();
+  cleanupApprovalReturnFocus = null;
+});
+document.addEventListener('kshetrajna-files-state', event => renderCleanupFromFileState(event.detail));
+renderCleanupFromFileState(currentFilesState);

@@ -674,3 +674,249 @@ dialog p {
 @media (prefers-reduced-motion: reduce) {
   #sort-ai .sort-status-dot.scanning, #sort-ai .sort-loading-state { animation: none; }
 }
+
+/* Cleanup is intentionally quieter than Sort AI: scope first, evidence second,
+   destructive action last.  Keep paths readable on narrow screens. */
+.cleanup-grid {
+  align-items: start;
+}
+.cleanup-grid .cleanup-overview {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, #1b2032, #151b2a 72%);
+  border-color: #3a4564;
+}
+.cleanup-toolbar {
+  display: grid;
+  grid-template-columns: minmax(15rem, 1fr) minmax(0, 1.5fr);
+  align-items: end;
+  gap: 1rem;
+  margin: 1rem 0 .9rem;
+  padding: .9rem;
+  border: 1px solid #303c59;
+  border-radius: 12px;
+  background: #111827;
+}
+.cleanup-toolbar .input-label {
+  min-width: 0;
+}
+.cleanup-scope-copy {
+  min-width: 0;
+  padding: .2rem 0;
+}
+.cleanup-scope-copy strong,
+.cleanup-scope-copy span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.cleanup-scope-copy strong {
+  color: #e2ddfb;
+  font-size: .86rem;
+}
+.cleanup-scope-copy span,
+.cleanup-scope-note {
+  color: #929fba;
+  font-size: .74rem;
+  line-height: 1.45;
+}
+.cleanup-scope-note {
+  margin: .3rem 0 .7rem;
+}
+.cleanup-scope-note[data-state="partial"] {
+  color: #e3c783;
+}
+.cleanup-scope-note[data-state="error"] {
+  color: #ffb4ad;
+}
+.cleanup-summary {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: .55rem;
+  margin: 0;
+}
+.cleanup-summary > div {
+  min-width: 0;
+  padding: .7rem .75rem;
+  border: 1px solid #303b56;
+  border-radius: 10px;
+  background: #151d2d;
+}
+.cleanup-summary strong,
+.cleanup-summary small {
+  display: block;
+}
+.cleanup-summary strong {
+  overflow-wrap: anywhere;
+  color: #e6e9f8;
+  font-size: 1rem;
+}
+.cleanup-summary small {
+  margin-top: .2rem;
+  color: #8f9db9;
+  font-size: .64rem;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.cleanup-summary .cleanup-candidate strong { color: #c9baff; }
+.cleanup-summary .cleanup-wasted strong { color: #e3c783; }
+.cleanup-summary .cleanup-partial strong { color: #ffb4ad; }
+.cleanup-summary .cleanup-ready strong { color: #9fdbb0; }
+.cleanup-grid > .panel:not(.cleanup-overview) {
+  min-width: 0;
+}
+.cleanup-grid > .panel:not(.cleanup-overview) > .cleanup-scope-note {
+  margin-top: -.35rem;
+  margin-bottom: .85rem;
+}
+.cleanup-grid .decision-journal,
+.cleanup-grid .sort-suggestions {
+  min-width: 0;
+}
+.cleanup-grid .file-action-entry {
+  padding: .8rem 0;
+}
+.cleanup-grid .file-action-entry > strong,
+.cleanup-grid .file-action-entry > small,
+.cleanup-grid .file-action-entry > code {
+  display: block;
+}
+.cleanup-grid .file-action-entry > strong {
+  color: #e3e7f2;
+  overflow-wrap: anywhere;
+}
+.cleanup-grid .file-action-entry > small {
+  color: #a5b1c8;
+}
+.cleanup-grid .file-action-entry > code,
+.cleanup-path {
+  display: block;
+  max-width: 100%;
+  margin-top: .3rem;
+  overflow-wrap: anywhere;
+  color: #b8c9e4;
+  font: .74rem/1.45 Consolas, "Courier New", monospace;
+}
+.cleanup-grid .file-action-entry[data-kind="empty"] {
+  border-left: 3px solid #b8a6ff;
+  padding-left: .75rem;
+}
+.cleanup-grid .file-action-entry[data-kind="duplicate"] {
+  border-left: 3px solid #e3c783;
+  padding-left: .75rem;
+}
+.cleanup-evidence {
+  display: block;
+  margin-top: .4rem;
+  color: #9caaca;
+  font-size: .72rem;
+  line-height: 1.45;
+}
+.cleanup-hash {
+  display: block;
+  margin-top: .35rem;
+  overflow-wrap: anywhere;
+  color: #d8cfff;
+  font: .7rem/1.45 Consolas, "Courier New", monospace;
+}
+.cleanup-keep {
+  color: #9fdbb0;
+}
+.cleanup-empty,
+.cleanup-loading,
+.cleanup-error {
+  padding: 1rem;
+  border: 1px dashed #394762;
+  border-radius: 11px;
+  background: #111827;
+}
+.cleanup-loading {
+  color: #cfc6f3;
+}
+.cleanup-error {
+  border-color: rgba(255, 175, 154, .55);
+  background: rgba(80, 39, 48, .2);
+  color: #ffc1b9;
+}
+.cleanup-warning {
+  display: block;
+  margin: .6rem 0;
+  padding: .65rem .75rem;
+  border-left: 3px solid #e1c17d;
+  border-radius: .35rem;
+  background: rgba(225, 193, 125, .1);
+  color: #e7ca8c;
+  font-size: .78rem;
+  line-height: 1.45;
+}
+.cleanup-group {
+  padding: .85rem;
+  border: 1px solid #3b4560;
+  border-radius: 13px;
+  background: linear-gradient(135deg, rgba(49, 55, 82, .38), rgba(15, 22, 36, .94));
+}
+.cleanup-group + .cleanup-group {
+  margin-top: .7rem;
+}
+.cleanup-group-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: .8rem;
+}
+.cleanup-group-heading strong,
+.cleanup-group-heading small {
+  display: block;
+}
+.cleanup-group-heading strong {
+  color: #e9e4ff;
+  font-size: .82rem;
+}
+.cleanup-group-heading small {
+  margin-top: .24rem;
+  color: #e3c783;
+  font-size: .7rem;
+}
+.cleanup-group-heading > span {
+  flex: 0 0 auto;
+  color: #aeb9d0;
+  font-size: .7rem;
+  text-align: right;
+}
+.cleanup-grid button.cleanup-delete-button {
+  min-height: 40px;
+  margin-top: .6rem;
+}
+.cleanup-grid button.cleanup-delete-button:disabled {
+  opacity: .45;
+}
+#cleanup-confirm-dialog {
+  width: min(38rem, calc(100vw - 2rem));
+}
+#cleanup-confirm-copy {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+#cleanup-confirm-effect {
+  margin: .85rem 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 980px) {
+  .cleanup-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 600px) {
+  .cleanup-toolbar {
+    grid-template-columns: 1fr;
+  }
+  .cleanup-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .cleanup-group-heading {
+    display: block;
+  }
+  .cleanup-group-heading > span {
+    display: block;
+    margin-top: .3rem;
+    text-align: left;
+  }
+}

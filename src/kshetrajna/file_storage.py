@@ -73,9 +73,11 @@ class FileStore:
                     
                     expected_size        INTEGER,
                     expected_mtime_ns    INTEGER,
-                    expected_ctime_ns    INTEGER,
-                    expected_dev         INTEGER,
-                    expected_ino         INTEGER,
+                     expected_ctime_ns    INTEGER,
+                     expected_dev         INTEGER,
+                     expected_ino         INTEGER,
+                     expected_sha256      TEXT,
+                     expected_peer_ids    TEXT,
                     
                     post_dev             INTEGER,
                     post_ino             INTEGER,
@@ -136,7 +138,8 @@ class FileStore:
                 if column not in columns:
                     db.execute(f"ALTER TABLE sort_suggestions ADD COLUMN {column} {definition}")
             for table, additions in {
-                'file_actions': {'destination_root_id': 'INTEGER REFERENCES roots(id)'},
+                'file_actions': {'destination_root_id': 'INTEGER REFERENCES roots(id)',
+                                 'expected_sha256': 'TEXT', 'expected_peer_ids': 'TEXT'},
                 'sort_suggestions': {'destination_root_id': 'INTEGER REFERENCES roots(id)', 'source_root_id': 'INTEGER REFERENCES roots(id)', 'project_name': "TEXT NOT NULL DEFAULT ''"},
                 'sort_plans': {'report': "TEXT NOT NULL DEFAULT '{}'"},
                 'roots': {'scan_limit': 'INTEGER NOT NULL DEFAULT 50000', 'watch_enabled': 'INTEGER NOT NULL DEFAULT 0',

@@ -190,6 +190,7 @@ class TestMalformedFileApiIds(unittest.TestCase):
     def request(self, method, path, body=None):
         connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=2)
         headers = {"Host": f"127.0.0.1:{self.server.server_port}"}
+        headers["X-Kshetrajna-Token"] = self.server.token
         if method == "POST":
             headers.update({
                 "Origin": f"http://127.0.0.1:{self.server.server_port}",
