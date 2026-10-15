@@ -261,7 +261,7 @@ def generate_insights(file_name: str, extension: str, relative_path: str, excerp
     summary = f"{purpose}" + (f" · {topic}" if topic and topic.casefold() not in purpose.casefold() else '')
     ambiguous_topics = len([subject for subject, terms in SUBJECTS if _matches(labels + ' ' + content_signals, terms)]) > 1
     requires_review = (action in {"cleanup", "review", "rename", "archive"}
-                       or duplicate_suffix or bool(duplicate_peers) or ambiguous_topics
+                       or duplicate_suffix or ambiguous_topics
                        or (profile["content_kind"] == "binary" and folder != 'Installers'))
     action_label = {
         "keep": "Keep with its related project/files",
@@ -285,7 +285,7 @@ def generate_insights(file_name: str, extension: str, relative_path: str, excerp
             "Review this numbered copy before deleting it; matching contents were not verified."
             if duplicate_suffix else
             'Similarly named files may be duplicates; complete contents have not been compared.'
-            if duplicate_peers else
+            if duplicate_suffix and duplicate_peers else
             'Several subjects match this preview; choose the intended subject before moving it.'
             if ambiguous_topics else
             "Review this binary/generated-looking file before deleting it; it may still be needed."

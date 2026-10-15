@@ -18,6 +18,7 @@ from .instance import InstanceLock
 from .file_storage import FileStore
 from .file_service import FileService
 from .file_demo import seed_file_demo
+from .download_watch import DownloadWatcher
 
 
 def main() -> int:
@@ -70,6 +71,8 @@ def main() -> int:
         parser.error(f"Could not open dashboard: {error}")
     server.service.restore_all()
     collector.start()
+    download_watcher = DownloadWatcher(file_service)
+    download_watcher.start()
     url = f"http://127.0.0.1:{server.server_port}/"
     logger.info("Dashboard started on loopback port %s", server.server_port)
     print(f"Kshetrajna dashboard: {url}")
@@ -82,6 +85,7 @@ def main() -> int:
     except KeyboardInterrupt:
         pass
     finally:
+        download_watcher.stop()
         collector.stop()
         server.chat.clear()
         server.service.restore_all()

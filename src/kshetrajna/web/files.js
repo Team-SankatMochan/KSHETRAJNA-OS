@@ -8,6 +8,22 @@ let filesRevision = 0;
 let sortRenderSignature = '';
 let pendingSortApproval = null;
 
+function setSortScopeControlsDisabled(disabled) {
+  for (const id of ['sort-root', 'sort-all-locations', 'prefer-existing', 'route-downloads-to-desktop', 'include-nested']) {
+    const control = $(id);
+    if (control) control.disabled = disabled;
+  }
+}
+
+function sortScopeFingerprint() {
+  return JSON.stringify({
+    root: $('sort-root')?.value || '',
+    preferExisting: $('prefer-existing')?.checked === true,
+    routeDownloads: $('route-downloads-to-desktop')?.checked !== false,
+    includeNested: $('include-nested')?.checked === true,
+  });
+}
+
 function finishSortApproval(approved) {
   const pending = pendingSortApproval;
   pendingSortApproval = null;
@@ -77,10 +93,129 @@ function sortGroups(plan) {
   for (const suggestion of plan.suggestions) {
     const folder = suggestion.destination_folder || suggestion.destination_relative.split(/[\\/]/).slice(0, -1).join('/');
     const key = `${suggestion.destination_root_id || plan.root_id}:${folder}`;
-    if (!groups.has(key)) groups.set(key, { folder, rootPath: suggestion.destination_root_path || plan.root_path, items: [] });
+    if (!groups.has(key)) groups.set(key, {
+      folder,
+      rootPath: suggestion.destination_root_path || plan.root_path,
+      rootLabel: suggestion.destination_root_label || '',
+      items: [],
+    });
     groups.get(key).items.push(suggestion);
   }
   return [...groups.values()];
+}
+
+function rootLeaf(path) {
+  return String(path || '').split(/[\\/]/).filter(Boolean).pop()?.toLowerCase() || '';
+}
+
+function rootDisplayName(root, fallback = 'approved location') {
+  return root?.label || (rootLeaf(root?.path) ? rootLeaf(root.path).replace(/^./, letter => letter.toUpperCase()) : fallback);
+}
+
+function isRootNamed(root, name) {
+  return rootLeaf(root?.path) === name || String(root?.label || '').trim().toLowerCase() === name;
+}
+
+function renderSortScopeSummary(state) {
+  const summary = $('sort-scope-summary');
+  const stats = $('sort-scope-stats');
+  if (!summary || !stats) return;
+  stats.replaceChildren();
+  const roots = state?.roots || [];
+  const indexed = roots.reduce((total, root) => total + Number(root.file_count || 0), 0);
+  const scanning = roots.filter(root => root.status === 'scanning');
+  const partial = roots.filter(root => root.status === 'truncated');
+  const errors = roots.filter(root => root.status === 'error');
+  const cancelled = roots.filter(root => root.status === 'cancelled');
+  let title = 'No approved locations yet';
+  let detail = 'Approve and scan a location in File library before creating a sorting preview.';
+  let stateClass = 'empty';
+  if (roots.length) {
+    if (scanning.length) {
+      title = 'Scope is still indexing';
+      detail = `${scanning.length} location${scanning.length === 1 ? '' : 's'} still scanning. Preview unlocks when the selected locations are ready.`;
+      stateClass = 'scanning';
+    } else if (errors.length) {
+      title = 'Scope needs attention';
+      detail = `${errors.length} approved location${errors.length === 1 ? '' : 's'} could not finish scanning. Review the File library before sorting.`;
+      stateClass = 'error';
+    } else if (cancelled.length) {
+      title = 'A scan was cancelled';
+      detail = `${cancelled.length} location${cancelled.length === 1 ? '' : 's'} need a rescan before Sort AI can use them.`;
+      stateClass = 'cancelled';
+    } else if (partial.length) {
+      title = 'Ready with partial coverage';
+      detail = 'Sort AI can work on the indexed subset. A scan limit was reached in one or more approved locations.';
+      stateClass = 'partial';
+    } else {
+      title = 'Scope ready for a preview';
+      detail = 'Indexed files are available. Choose one location or compare all approved locations together.';
+      stateClass = 'ready';
+    }
+  }
+  summary.dataset.state = stateClass;
+  const status = summary.querySelector('.sort-scope-status');
+  status.replaceChildren(
+    element('span', null, `sort-status-dot ${stateClass}`),
+    (() => {
+      const copy = element('div');
+      copy.append(element('strong', title), element('p', detail));
+      return copy;
+    })(),
+  );
+  const scanLabel = scanning.length ? `${scanning.length} scanning` : partial.length ? `${partial.length} partial` : errors.length ? `${errors.length} attention` : cancelled.length ? `${cancelled.length} cancelled` : roots.length ? 'Ready' : 'Not started';
+  for (const [value, label, className] of [
+    [indexed.toLocaleString(), 'indexed files', 'indexed'],
+    [roots.length.toLocaleString(), 'approved locations', 'locations'],
+    [scanLabel, 'scan status', stateClass],
+  ]) {
+    const card = element('div', null, `sort-scope-stat ${className}`);
+    card.append(element('strong', String(value)), element('small', label));
+    stats.append(card);
+  }
+  renderDownloadsHint(state);
+}
+
+function renderDownloadsHint(state, plan = null) {
+  const hint = $('sort-routing-hint');
+  if (!hint) return;
+  const roots = state?.roots || [];
+  const eligibleRoots = roots.filter(root => ['ready', 'truncated'].includes(root.status));
+  const selected = $('sort-root')?.value;
+  const scopeRoots = selected === 'all' ? eligibleRoots : eligibleRoots.filter(root => String(root.id) === String(selected));
+  const downloads = scopeRoots.find(root => isRootNamed(root, 'downloads'));
+  if (!downloads) {
+    hint.hidden = true;
+    hint.replaceChildren();
+    return;
+  }
+  const desktop = eligibleRoots.find(root => isRootNamed(root, 'desktop'));
+  const routeEnabled = $('route-downloads-to-desktop')?.checked !== false;
+  const routedCount = plan?.suggestions?.filter(suggestion =>
+    isRootNamed({path: suggestion.source_root_path}, 'downloads') &&
+    isRootNamed({path: suggestion.destination_root_path}, 'desktop')).length || 0;
+  hint.hidden = false;
+  hint.dataset.available = desktop ? 'true' : 'false';
+  const copy = element('div');
+  if (desktop && routeEnabled) {
+    copy.append(
+      element('strong', routedCount ? `Downloads → ${rootDisplayName(desktop)}` : 'Downloads can use your approved Desktop'),
+      element('span', routedCount
+        ? `${routedCount} clear match${routedCount === 1 ? '' : 'es'} in this preview point to ${desktop.path}. Review the destination before approval.`
+        : `Clear loose Downloads matches can be routed to ${desktop.path}, even when you preview only Downloads. Ambiguous or sensitive files stay in review.`),
+    );
+  } else if (desktop) {
+    copy.append(
+      element('strong', 'Downloads and Desktop are both approved'),
+      element('span', 'Desktop routing preference is off. Review the preview paths; the backend still chooses a safe destination.'),
+    );
+  } else {
+    copy.append(
+      element('strong', 'Downloads is approved, but Desktop is not in scope'),
+      element('span', 'Approve Desktop and include it in this scope if you want clear Downloads matches to use it.'),
+    );
+  }
+  hint.replaceChildren(element('span', 'ROUTING NOTE', 'eyebrow'), copy);
 }
 
 async function refreshFiles() {
@@ -98,9 +233,24 @@ async function refreshFiles() {
     renderInsights(insights);
     renderActionJournal(actions.actions || []);
     const summaries = state.sort_plans || [];
-    const summary = currentSortPlan
+    const selectedSortValue = $('sort-root').value;
+    const selectedReadyIds = state.roots.filter(root => ['ready', 'truncated'].includes(root.status)).map(root => root.id).sort((a, b) => a - b);
+    const summaryMatchesScope = plan => {
+      try {
+        const report = typeof plan.report === 'string' ? JSON.parse(plan.report || '{}') : plan.report || {};
+        const planRoots = (report.source_roots || [plan.root_id]).map(Number).sort((a, b) => a - b);
+        if (selectedSortValue !== 'all') {
+          return planRoots.length === 1 && planRoots[0] === Number(selectedSortValue);
+        }
+        return JSON.stringify(planRoots) === JSON.stringify(selectedReadyIds);
+      } catch (error) { return false; }
+    };
+    let summary = currentSortPlan
       ? summaries.find(plan => plan.id === currentSortPlan.id)
-      : summaries.find(plan => plan.root_id === Number($('sort-root').value) && ['preview', 'partial', 'applied', 'undo_partial'].includes(plan.status));
+      : summaries.find(plan => summaryMatchesScope(plan) && ['preview', 'partial', 'applied', 'undo_partial'].includes(plan.status));
+    if (summary && Date.parse(summary.expires_at) <= Date.now()) {
+      summary = summaries.find(p => p.root_id === summary.root_id && p.status === 'preview' && Date.parse(p.expires_at) > Date.now()) || summary;
+    }
     if (summary) {
       try {
         const plan = await request('/api/files/sort/plan/' + encodeURIComponent(summary.id));
@@ -115,6 +265,16 @@ async function refreshFiles() {
     renderSortPlan(currentSortPlan);
   } catch (error) {
     $('file-feedback').textContent = `Could not refresh files: ${error.message}. Check that the local app is running.`;
+    const summary = $('sort-scope-summary');
+    const status = summary?.querySelector('.sort-scope-status');
+    if (status) {
+      summary.dataset.state = 'error';
+      status.replaceChildren(element('span', null, 'sort-status-dot error'), (() => {
+        const copy = element('div');
+        copy.append(element('strong', 'Scope status unavailable'), element('p', 'The local file service did not respond. Try again when the app is running.'));
+        return copy;
+      })());
+    }
   } finally {
     filesRefreshing = false;
   }
@@ -153,6 +313,7 @@ function renderFiles(state) {
   currentFilesState = state;
   const demo = state.mode === 'demo';
   $('files-mode').textContent = demo ? 'SYNTHETIC DEMO' : 'LIVE';
+  renderSortScopeSummary(state);
   
   const rootsList = $('roots-list');
   rootsList.replaceChildren();
@@ -173,6 +334,7 @@ function renderFiles(state) {
       
       info.append(label, path, stats);
       if (root.error) info.append(element('small', root.error, 'sort-warning'));
+      if (root.watch_enabled) info.append(element('small', `Watching · ${root.watch_message || 'Waiting for new downloads'}`, 'watch-state'));
       if (root.status === 'truncated') info.append(element('small', 'Scan limit reached. You can sort the indexed subset or approve a smaller folder.', 'sort-warning'));
       if (root.status === 'ready' && !root.file_count) info.append(element('small', 'No indexable files found. Cloud-only files and links are skipped; make cloud files available offline before rescanning.', 'quiet'));
       item.append(info);
@@ -184,6 +346,16 @@ function renderFiles(state) {
         actions.append(button('Rescan', () => mutateFile('/api/files/roots/rescan', {root_id: root.id}, 'Rescan started.'), 'secondary'));
       }
       actions.append(button('Remove', () => mutateFile('/api/files/roots/remove', {root_id: root.id}, 'Root removed.'), 'danger text-button'));
+      if (root.watch_enabled && root.watch_message?.includes('New arrivals checked:')) actions.append(button('Review new arrivals', async () => {
+        $('sort-root').value = String(root.id);
+        if ($('sort-all-locations')) $('sort-all-locations').checked = false;
+        location.hash = 'sort-ai';
+        await generateSortPlan();
+      }, 'primary'));
+      if (!demo) actions.append(button(root.watch_enabled ? 'Pause watching' : 'Watch new files', async () => {
+        if (!root.watch_enabled && !await requestSortApproval('Watch this approved folder?', `${root.path}\n\nCheck immediate files every 2 seconds, wait for stable size and timestamp, then refresh the index. Partial downloads are ignored. No file moves automatically; review a fresh sorting batch when ready. Watching stops when the app quits.`)) return;
+        await mutateFile('/api/files/roots/watch', {root_id:root.id, enabled:!root.watch_enabled}, root.watch_enabled ? 'Folder watching paused.' : 'Watching new downloads.');
+      }, 'secondary'));
       
       item.append(actions);
       rootsList.append(item);
@@ -193,7 +365,8 @@ function renderFiles(state) {
   const sortRoot = $('sort-root');
   const previousRoot = sortRoot.value;
   const readyRoots = state.roots.filter(root => ['ready', 'truncated'].includes(root.status));
-  const options = readyRoots.length ? [...(readyRoots.length > 1 ? [['All approved locations', 'all']] : []), ...readyRoots.map(root => [`${root.label || 'Approved folder'} · ${root.path}`, String(root.id)])] : [['Add and scan a folder first', '']];
+  const scansPending = state.roots.some(root => root.status === 'scanning');
+  const options = readyRoots.length ? [...(readyRoots.length > 1 && !scansPending ? [['All approved locations', 'all']] : []), ...readyRoots.map(root => [`${root.label || 'Approved folder'} · ${root.path}`, String(root.id)])] : [['Add and scan a folder first', '']];
   const optionSignature = JSON.stringify(options);
   if (sortRoot.dataset.options !== optionSignature) {
     sortRoot.replaceChildren();
@@ -203,6 +376,15 @@ function renderFiles(state) {
     sortRoot.dataset.options = optionSignature;
     sortRoot.value = options.some(([,value]) => value === previousRoot) ? previousRoot : options[0][1];
   }
+  const allLocations = $('sort-all-locations');
+  if (allLocations) {
+    allLocations.disabled = readyRoots.length < 2 || scansPending || sortBusy;
+    allLocations.checked = sortRoot.value === 'all';
+    allLocations.closest('.sort-all-toggle')?.classList.toggle('selected', allLocations.checked);
+    const note = allLocations.closest('.sort-all-toggle')?.querySelector('small');
+    if (note) note.textContent = scansPending ? 'Available after approved scans finish.' : 'Compare sources and destinations across this scope.';
+  }
+  renderDownloadsHint(state);
   $('sort-generate').disabled = !readyRoots.length || sortBusy;
   $('sort-auto').disabled = !readyRoots.length || sortBusy;
   const history = $('sort-history');
@@ -234,58 +416,105 @@ function renderSortPlan(plan) {
   actions.replaceChildren();
   if (typeof renderProjectCandidates === 'function') renderProjectCandidates(plan);
   if (!plan) {
-    status.textContent = currentFilesState?.mode === 'demo' ? 'SIMULATION / REVIEWED IDEAS' : 'REVIEWED IDEAS';
-    list.append(element('p', 'Choose a ready approved folder to hear organization ideas.', 'empty'));
+    status.textContent = currentFilesState?.mode === 'demo' ? 'SIMULATION / READY' : 'READY FOR A PREVIEW';
+    $('sort-filter-wrap').hidden = true;
+    renderDownloadsHint(currentFilesState);
+    const empty = element('div', null, 'sort-empty-state');
+    if (currentFilesState?.roots?.length) {
+      empty.append(element('strong', 'Choose a ready scope to begin.'), element('p', 'Preview the indexed files first. Sort AI will put clear matches above the advice queue.'));
+    } else {
+      empty.append(element('strong', 'No approved files to organize yet.'), element('p', 'Approve and scan a location in File library, then return here to preview safe matches.'));
+      const link = element('a', 'Open File library ↗', 'sort-empty-link');
+      link.href = '#files';
+      empty.append(link);
+    }
+    list.append(empty);
     return;
   }
   status.textContent = `${plan.mode === 'demo' ? 'SIMULATION / ' : ''}${plan.status.replaceAll('_', ' ').toUpperCase()}`;
-  const automatic = plan.suggestions.filter(s => s.automation_eligible);
+  const automatic = plan.suggestions.filter(s => s.automation_eligible && s.status === 'suggested');
   const needsReview = plan.suggestions.filter(s => !s.automation_eligible && ['suggested', 'blocked', 'failed', 'undo_failed'].includes(s.status));
   const completed = plan.suggestions.filter(s => ['applied', 'rolled_back'].includes(s.status));
+  const openPlan = ['preview', 'partial'].includes(plan.status);
+  const automaticCount = openPlan && Number.isFinite(Number(plan.automatic_count)) ? Number(plan.automatic_count) : automatic.length;
+  const reviewCount = Number.isFinite(Number(plan.review_count)) ? Number(plan.review_count) : needsReview.length;
   const filter = $('sort-filter')?.value.trim().toLowerCase() || '';
   const filtered = needsReview.filter(s => !filter || [s.source_relative,s.destination_relative,s.project_name,s.reason].join(' ').toLowerCase().includes(filter));
   const groups = sortGroups({...plan, suggestions: filtered.slice(0, 100)});
   const report = plan.report || {};
   const counters = element('div', null, 'summary-grid');
-  for (const [count, label] of [[report.considered || plan.suggestions.length, 'files considered'],[automatic.length, 'clear matches'],[needsReview.length, 'need your advice'],[report.kept || 0, 'kept in place'],[report.remembered_keep || 0, 'remembered keeps'],[completed.filter(s => s.status === 'applied').length, 'moved this batch']]) {
-    const cell = element('div'); cell.append(element('strong', Number(count).toLocaleString()), element('small', label)); counters.append(cell);
+  for (const [count, label, className] of [[report.considered ?? plan.suggestions.length, 'files considered', 'considered'],[automaticCount, 'clear matches', 'automatic'],[reviewCount, 'need your advice', 'review'],[report.kept || 0, 'kept in place', 'kept'],[report.remembered_keep || 0, 'remembered keeps', 'remembered'],[completed.filter(s => s.status === 'applied').length, 'moved this batch', 'moved']]) {
+    const cell = element('div', null, `sort-plan-stat ${className}`);
+    cell.append(element('strong', Number(count).toLocaleString()), element('small', label)); counters.append(cell);
   }
   meta.append(counters);
   meta.append(
-    element('strong', `${automatic.length} clear matches · ${needsReview.length} need your advice · ${completed.filter(s => s.status === 'applied').length} moved`),
+    element('strong', `${automaticCount} clear matches ready · ${reviewCount} need your advice · ${completed.filter(s => s.status === 'applied').length} moved`),
     element('small', `Auto-sort moves up to ${plan.batch_limit || 500} clear matches per batch. Preview expires ${timeLabel(plan.expires_at)}.`, 'quiet'),
   );
   if (report.reasons) {
     const labels = {already_organized:'already organized', existing_collections:'existing collections', project_structure:'project structure preserved', sensitive:'sensitive files excluded'};
     meta.append(element('small', Object.entries(report.reasons).map(([key,count]) => `${Number(count).toLocaleString()} ${labels[key] || key}`).join(' · '), 'quiet'));
   }
-  if (plan.scan_partial) meta.append(element('small', 'Partial scan: only the files indexed in the latest pass are considered.', 'sort-warning'));
+  if (plan.scan_partial) {
+    const partialNames = (plan.partial_source_roots || []).map(root => root.label || root.path).join(', ');
+    meta.append(element('small', partialNames
+      ? `Partial scan in ${partialNames}: only the files indexed in the latest pass are considered.`
+      : 'Partial scan: only the files indexed in the latest pass are considered.', 'sort-warning'));
+  }
   if (plan.error) meta.append(element('p', plan.error, 'sort-warning'));
+  renderDownloadsHint(currentFilesState, plan);
+  $('sort-filter-wrap').hidden = !needsReview.length;
   if (automatic.length) {
+    const section = element('section', null, 'sort-auto-queue');
+    const heading = element('div', null, 'sort-queue-heading');
+    heading.append(element('div', null, 'sort-queue-icon'), (() => {
+      const copy = element('div');
+      copy.append(element('strong', `Ready to auto-sort · ${automaticCount} clear match${automaticCount === 1 ? '' : 'es'}`), element('small', 'Destinations are explainable and can be undone from the journal.', 'quiet'));
+      return copy;
+    })());
     const details = document.createElement('details');
     details.className = 'sort-auto-summary';
-    details.append(element('summary', `Clear matches: inspect destinations (${automatic.length})`));
+    details.open = true;
+    details.append(element('summary', 'Inspect destination groups before approving'));
     for (const group of sortGroups({...plan, suggestions: automatic})) {
-      details.append(element('p', `${sortFolderPath({path:group.rootPath}, group.folder)}: ${group.items.length} files`));
+      const destination = element('div', null, 'sort-auto-destination');
+      destination.append(element('strong', `${group.items.length} file${group.items.length === 1 ? '' : 's'}`), element('code', group.folder ? sortFolderPath({path:group.rootPath}, group.folder) : group.rootPath));
+      details.append(destination);
       details.append(element('small', group.items.slice(0, 10).map(s => s.source_relative).join(', ') + (group.items.length > 10 ? '…' : ''), 'quiet'));
     }
-    list.append(details);
+    section.append(heading, details);
+    list.append(section);
   }
-  if (!needsReview.length && plan.suggestions.length) list.append(element('p', automatic.length ? 'No ambiguous files need your advice. Use Auto-sort clear matches to move this batch.' : 'No pending sorting decisions. Kept files stay where they are; undo is available for eligible moves.', 'empty'));
+  if (needsReview.length) {
+    const reviewHeading = element('div', null, 'sort-review-queue-heading');
+    reviewHeading.append(element('div', null, 'sort-review-icon'), (() => {
+      const copy = element('div');
+      copy.append(element('strong', `Advice queue · ${reviewCount} file${reviewCount === 1 ? '' : 's'}`), element('small', 'These files are ambiguous, sensitive, blocked, or otherwise need your decision.', 'quiet'));
+      return copy;
+    })());
+    list.append(reviewHeading);
+  }
+  if (!needsReview.length && plan.suggestions.length) list.append(element('p', automatic.length ? 'No ambiguous files need your advice. Inspect the destinations above, then use Auto-sort clear matches.' : 'No pending sorting decisions. Kept files stay where they are; undo is available for eligible moves.', 'empty'));
   if (filtered.length > 100) list.append(element('p', `Showing 100 of ${filtered.length} matching decisions. Narrow the filter to find another file. Remaining files stay untouched.`, 'quiet'));
   if (!plan.suggestions.length) {
-    list.append(element('p', 'I did not find a safe organization idea in this indexed folder.', 'empty'));
+    const empty = element('div', null, 'sort-empty-state');
+    empty.append(element('strong', 'No safe organization ideas found in this preview.'), element('p', 'Files stay where they are. Try another approved location or adjust project scopes if the files belong together.'));
+    list.append(empty);
   }
-  const root = {path: plan.root_path, label: plan.root_label};
   for (const group of groups) {
     const movable = group.items.filter(suggestion => suggestion.status === 'suggested');
     const blocked = group.items.filter(suggestion => suggestion.status === 'blocked');
     const card = element('article', null, `sort-conversation${blocked.length && !movable.length ? ' blocked' : ''}`);
     const noun = group.items.length === 1 ? 'this file' : 'these files';
-    const location = root ? sortLocation(root) : 'the approved folder';
-    const destination = sortFolderPath({path:group.rootPath}, group.folder);
-    const sentence = group.folder ? `Needs your advice: ${noun}. Suggested folder: ${group.folder}.` : `Needs your advice: ${noun}. Keep here or choose a destination in Preview & decide.`;
-    card.append(element('p', sentence), element('code', destination));
+    const destination = group.folder ? sortFolderPath({path:group.rootPath}, group.folder) : group.rootPath;
+    const cardHeading = element('div', null, 'sort-card-heading');
+    const headingCopy = element('div');
+    headingCopy.append(element('p', group.folder ? `Suggested home for ${noun}` : `Review ${noun} before choosing a home.`), element('small', group.folder ? `Matched folder: ${group.folder}` : 'No safe folder match was selected.', 'quiet'));
+    const destinationBlock = element('div', null, 'sort-destination-block');
+    destinationBlock.append(element('span', `TO ${group.rootLabel || rootDisplayName({path: group.rootPath})}`, 'sort-path-label'), element('code', destination));
+    cardHeading.append(headingCopy, destinationBlock);
+    card.append(cardHeading);
     const summaries = [...new Set(group.items.map(suggestion => suggestion.content_summary).filter(Boolean))];
     if (summaries.length) {
       card.append(element('small', `What I saw in the approved preview: ${summaries.join(' ')}`, 'sort-content-summary sort-content-summary-banner'));
@@ -295,10 +524,9 @@ function renderSortPlan(plan) {
     for (const suggestion of group.items) {
       const item = document.createElement('li');
       const sourcePath = sortFolderPath({path:suggestion.source_root_path || plan.root_path}, suggestion.source_relative);
-      item.append(
-        element('span', suggestion.source_relative),
-        element('code', sourcePath, 'sort-source-path'),
-      );
+      const sourceBlock = element('div', null, 'sort-source-block');
+      sourceBlock.append(element('span', `FROM ${rootDisplayName({path: suggestion.source_root_path || plan.root_path})}`, 'sort-path-label'), element('span', suggestion.source_relative, 'sort-source-name'), element('code', sourcePath, 'sort-source-path'));
+      item.append(sourceBlock);
       if (suggestion.content_summary) {
         item.append(element('small', suggestion.content_summary, 'sort-content-summary'));
       }
@@ -339,26 +567,54 @@ async function generateSortPlan() {
   if (!all && (!Number.isInteger(rootId) || rootId <= 0)) return;
   sortBusy = true;
   filesRevision += 1;
+  const requestRevision = filesRevision;
+  const requestScope = sortScopeFingerprint();
   currentSortPlan = null;
+  setSortScopeControlsDisabled(true);
   $('sort-generate').disabled = true;
   $('sort-auto').disabled = true;
+  $('sort-all-locations').disabled = true;
+  $('sort-status').textContent = 'BUILDING PREVIEW';
+  $('sort-scope-summary').setAttribute('aria-busy', 'true');
+  $('sort-plan-meta').replaceChildren();
+  $('sort-suggestions').replaceChildren(element('div', null, 'sort-loading-state'));
+  $('sort-suggestions').firstElementChild.append(element('strong', 'Reading your approved scope…'), element('p', 'Matching filenames, existing folders, and safe destinations locally.'));
+  $('sort-feedback').textContent = '';
+  $('sort-feedback').style.color = '';
   try {
-    currentSortPlan = await post(all ? '/api/files/sort/scope-preview' : '/api/files/sort/preview', {
+    const sortPayload = {
       ...(all ? {root_ids:currentFilesState.roots.filter(r => ['ready','truncated'].includes(r.status)).map(r => r.id)} : {root_id:rootId}),
       create_folders: true,
       prefer_existing: $('prefer-existing').checked,
       include_nested: $('include-nested').checked,
-    });
+      // Older servers ignore unknown JSON keys and keep their safe Downloads default;
+      // newer servers can honor this preference without changing the request shape.
+      route_downloads_to_desktop: $('route-downloads-to-desktop')?.checked !== false,
+    };
+    const preview = await post(all ? '/api/files/sort/scope-preview' : '/api/files/sort/preview', sortPayload);
+    if (requestRevision !== filesRevision || requestScope !== sortScopeFingerprint()) {
+      $('sort-feedback').textContent = 'The scope changed while the preview was loading. Preview again to use the current selection.';
+      return;
+    }
+    currentSortPlan = preview;
     renderSortPlan(currentSortPlan);
     $('sort-feedback').textContent = `${currentSortPlan.automatic_count} clear matches can be sorted together; ${currentSortPlan.review_count} files need your advice.`;
     $('sort-feedback').style.color = '';
   } catch (error) {
+    $('sort-status').textContent = 'PREVIEW UNAVAILABLE';
+    $('sort-suggestions').replaceChildren(element('div', null, 'sort-empty-state error'));
+    $('sort-suggestions').firstElementChild.append(element('strong', 'The preview could not be created.'), element('p', error.message));
     $('sort-feedback').textContent = error.message;
     $('sort-feedback').style.color = '#f0aaa0';
   } finally {
     sortBusy = false;
+    $('sort-scope-summary').setAttribute('aria-busy', 'false');
     $('sort-generate').disabled = false;
     $('sort-auto').disabled = false;
+    setSortScopeControlsDisabled(false);
+    const readyCount = currentFilesState?.roots?.filter(root => ['ready', 'truncated'].includes(root.status)).length || 0;
+    const scansPending = currentFilesState?.roots?.some(root => root.status === 'scanning');
+    $('sort-all-locations').disabled = readyCount < 2 || scansPending;
   }
 }
 
@@ -372,7 +628,18 @@ async function autoSortClearMatches() {
   const count = Math.min(currentSortPlan.automatic_count || 0, currentSortPlan.batch_limit || 500);
   if (!count) { $('sort-feedback').textContent = 'No clear matches remain. The files below need your advice or are already organized.'; return; }
   const destinations = sortGroups({...currentSortPlan, suggestions:currentSortPlan.suggestions.filter(s => s.automation_eligible).slice(0,count)}).map(group => `${sortFolderPath({path:group.rootPath}, group.folder)}: ${group.items.length} files`).join('\n');
-  if (!await requestSortApproval(`Auto-sort ${count} clear matches?`, `${root.path}\n\n${destinations}\n\nOnly loose files with clear destinations move. Folders are created as needed. Ambiguous files stay untouched; nothing is deleted. Eligible moves can be undone.`)) return;
+  const approvalRevision = filesRevision;
+  const approvalScope = sortScopeFingerprint();
+  setSortScopeControlsDisabled(true);
+  if (!await requestSortApproval(`Auto-sort ${count} clear matches?`, `${root.path}\n\n${destinations}\n\nOnly loose files with clear destinations move. Folders are created as needed. Ambiguous files stay untouched; nothing is deleted. Eligible moves can be undone.`)) {
+    setSortScopeControlsDisabled(false);
+    return;
+  }
+  if (approvalRevision !== filesRevision || approvalScope !== sortScopeFingerprint()) {
+    setSortScopeControlsDisabled(false);
+    $('sort-feedback').textContent = 'The scope changed while approval was open. No files were moved; preview again.';
+    return;
+  }
   sortBusy = true;
   $('sort-auto').disabled = true;
   $('sort-generate').disabled = true;
@@ -386,6 +653,7 @@ async function autoSortClearMatches() {
     $('sort-feedback').textContent = `Sorting could not finish: ${error.message}`;
   } finally {
     sortBusy = false;
+    setSortScopeControlsDisabled(false);
     await refreshFiles();
   }
 }
@@ -400,7 +668,18 @@ async function applySortPlan(selectedIds = null) {
   const question = chosenSuggestions.length === 1
     ? `Approve moving ${chosenSuggestions[0].source_relative} to ${root ? sortFolderPath(root, destination.split(/[\\/]/).slice(0, -1).join('/')) : destination}?`
     : `Approve moving ${chosenSuggestions.length} files to their reviewed destinations?`;
-  if (!await requestSortApproval('Move reviewed files?', question)) return;
+  const approvalRevision = filesRevision;
+  const approvalScope = sortScopeFingerprint();
+  setSortScopeControlsDisabled(true);
+  if (!await requestSortApproval('Move reviewed files?', question)) {
+    setSortScopeControlsDisabled(false);
+    return;
+  }
+  if (approvalRevision !== filesRevision || approvalScope !== sortScopeFingerprint()) {
+    setSortScopeControlsDisabled(false);
+    $('sort-feedback').textContent = 'The scope changed while approval was open. No files were moved; preview again.';
+    return;
+  }
   sortBusy = true;
   filesRevision += 1;
   try {
@@ -417,13 +696,18 @@ async function applySortPlan(selectedIds = null) {
     $('sort-feedback').style.color = '#f0aaa0';
   } finally {
     sortBusy = false;
+    setSortScopeControlsDisabled(false);
     await refreshFiles();
   }
 }
 
 async function undoSortPlan() {
   if (!currentSortPlan || sortBusy) return;
-  if (!await requestSortApproval('Undo this sorting batch?', 'Restore eligible file moves to their original locations. Paths that changed will not be overwritten.')) return;
+  setSortScopeControlsDisabled(true);
+  if (!await requestSortApproval('Undo this sorting batch?', 'Restore eligible file moves to their original locations. Paths that changed will not be overwritten.')) {
+    setSortScopeControlsDisabled(false);
+    return;
+  }
   sortBusy = true;
   filesRevision += 1;
   try {
@@ -436,6 +720,7 @@ async function undoSortPlan() {
     $('sort-feedback').style.color = '#f0aaa0';
   } finally {
     sortBusy = false;
+    setSortScopeControlsDisabled(false);
     await refreshFiles();
   }
 }
@@ -789,9 +1074,44 @@ $('sort-auto').addEventListener('click', autoSortClearMatches);
 $('sort-root').addEventListener('change', () => {
   filesRevision += 1;
   currentSortPlan = null;
+  const allSelected = $('sort-root').value === 'all';
+  $('sort-all-locations').checked = allSelected;
+  $('sort-all-locations').closest('.sort-all-toggle')?.classList.toggle('selected', allSelected);
   renderSortPlan(null);
+  renderDownloadsHint(currentFilesState);
   $('sort-feedback').textContent = '';
 });
+$('sort-all-locations').addEventListener('change', event => {
+  const readyRoots = currentFilesState?.roots?.filter(root => ['ready', 'truncated'].includes(root.status)) || [];
+  if (event.target.checked) {
+    if (readyRoots.length < 2) {
+      event.target.checked = false;
+      return;
+    }
+    $('sort-root').value = 'all';
+  } else {
+    const first = readyRoots[0];
+    $('sort-root').value = first ? String(first.id) : '';
+  }
+  event.target.closest('.sort-all-toggle')?.classList.toggle('selected', event.target.checked);
+  filesRevision += 1;
+  currentSortPlan = null;
+  renderSortPlan(null);
+  renderDownloadsHint(currentFilesState);
+  $('sort-feedback').textContent = '';
+});
+function invalidateSortPreview() {
+  if (sortBusy) return;
+  filesRevision += 1;
+  currentSortPlan = null;
+  sortRenderSignature = '';
+  renderSortPlan(null);
+  renderDownloadsHint(currentFilesState);
+  $('sort-feedback').textContent = 'Sorting preferences changed. Preview again to update destinations.';
+}
+$('prefer-existing').addEventListener('change', invalidateSortPreview);
+$('route-downloads-to-desktop').addEventListener('change', invalidateSortPreview);
+$('include-nested').addEventListener('change', invalidateSortPreview);
 $('sort-history').addEventListener('change', async () => {
   const id = $('sort-history').value;
   if (!id || sortBusy) return;

@@ -4,6 +4,7 @@ import json
 import threading
 import time
 import uuid
+import hashlib
 from datetime import datetime, timezone, timedelta
 from pathlib import Path, PureWindowsPath
 import logging
@@ -230,6 +231,21 @@ class FileService:
             # Existing previews may refer to the removed rule. Require a fresh review.
             db.execute("UPDATE sort_plans SET status='expired' WHERE status IN ('preview','partial')")
         return {'removed': True}
+
+    def set_folder_watch(self, root_id, enabled) -> dict:
+        root_id = self._positive_id(root_id, 'root_id')
+        if self.demo or type(enabled) is not bool:
+            raise ValueError('Watching requires a live approved folder and a boolean enabled value')
+        with self._gate:
+            root = self.store.get_root(root_id)
+            if not root or root['status'] == 'removed':
+                raise ValueError('Approved root not found')
+            if enabled:
+                self.action_manager._validate_path_safety(Path(root['path']), Path(root['path']))
+            with self.store._connect() as db:
+                db.execute('UPDATE roots SET watch_enabled=?,watch_message=? WHERE id=?',
+                           (int(enabled), 'Waiting for settled new or changed files.' if enabled else 'Watching paused.', root_id))
+            return self.store.get_root(root_id)
 
     def rescan_root(self, root_id: int) -> None:
         root_id = self._positive_id(root_id, "root_id")
@@ -509,7 +525,14 @@ class FileService:
         result['automatic_count'] = sum(s['automation_eligible'] for s in result['suggestions'])
         result['review_count'] = sum(s['status'] in ('suggested', 'blocked', 'failed') and not s['automation_eligible'] for s in result['suggestions'])
         result['batch_limit'] = 500
-        result['scan_partial'] = bool(root and root['status'] == 'truncated')
+        source_root_ids = result.get('report', {}).get('source_roots') or [result['root_id']]
+        partial_roots = [approved_roots[root_id] for root_id in source_root_ids
+                         if approved_roots.get(root_id, {}).get('status') == 'truncated']
+        result['scan_partial'] = bool(partial_roots)
+        result['partial_source_roots'] = [
+            {'id': partial['id'], 'label': partial['label'], 'path': partial['path']}
+            for partial in partial_roots
+        ]
         return result
 
     def _sort_plan(self, plan_id: str) -> dict:
@@ -520,10 +543,12 @@ class FileService:
             raise ValueError("Sort plan not found")
         return plan
 
-    def generate_sort_plan(self, root_id: int, create_folders: bool = False, *, prefer_existing=False, include_nested=False, root_ids=None) -> dict:
+    def generate_sort_plan(self, root_id: int, create_folders: bool = False, *, prefer_existing=True,
+                           include_nested=False, route_downloads_to_desktop=True, root_ids=None) -> dict:
         root_id = self._positive_id(root_id, "root_id")
-        if any(type(value) is not bool for value in (create_folders, prefer_existing, include_nested)):
-            raise ValueError("create_folders must be a boolean")
+        if any(type(value) is not bool for value in (create_folders, prefer_existing, include_nested,
+                                                     route_downloads_to_desktop)):
+            raise ValueError("Sort preferences must be boolean")
         with self._gate:
             root = self.store.get_root(root_id)
             if not root:
@@ -538,17 +563,24 @@ class FileService:
                 raise ValueError('Wait for the selected scans to finish')
             inventory = folder_inventory(self.store, inspect=not self.demo)
             approved_roots = {r['id']: r for r in self.store.get_roots()}
-            projects = [{**p, 'root_path': approved_roots[p['root_id']]['path']} for p in self.store.get_projects() if p['root_id'] in approved_roots]
+            projects = [{**p, 'root_path': approved_roots[p['root_id']]['path']}
+                        for p in self.store.get_projects()
+                        if p['root_id'] in approved_roots
+                        and approved_roots[p['root_id']]['status'] in ('ready', 'truncated')]
             suggestions = []
-            report = {'considered': 0, 'kept': 0, 'suggested': 0, 'remembered_keep': 0, 'reasons': {}, 'project_candidates': [], 'source_roots': [r['id'] for r in roots]}
+            report = {'considered': 0, 'kept': 0, 'suggested': 0, 'advice': 0, 'remembered_keep': 0,
+                      'reasons': {}, 'project_candidates': [], 'source_roots': [r['id'] for r in roots]}
             for source_root in roots:
                 files = self.store.get_sortable_files(source_root['id'])
                 items, accounting = organization_plan(files, source_root, projects, inventory,
-                    create_folders=create_folders, inspect=not self.demo, prefer_existing=prefer_existing, include_nested=include_nested)
+                    create_folders=create_folders, inspect=not self.demo, prefer_existing=prefer_existing,
+                    include_nested=include_nested, route_downloads_to_desktop=route_downloads_to_desktop,
+                    approved_roots=list(approved_roots.values()),
+                    scope_root_ids=[selected['id'] for selected in roots])
                 for suggestion in items:
                     suggestion['source_root_id'] = source_root['id']
                 suggestions.extend(items)
-                for key in ('considered', 'kept', 'suggested'):
+                for key in ('considered', 'kept', 'suggested', 'advice'):
                     report[key] += accounting[key]
                 for key, count in accounting['reasons'].items():
                     report['reasons'][key] = report['reasons'].get(key, 0) + count
@@ -811,6 +843,7 @@ class FileService:
             applied = []
             failed = []
             for suggestion in selected:
+                action = None
                 try:
                     with self.store._connect() as db:
                         source = db.execute('SELECT root_id,relative_path FROM files WHERE id=?', (suggestion['file_id'],)).fetchone()
@@ -827,11 +860,11 @@ class FileService:
                     self.store.update_sort_suggestion(suggestion["id"], {"status": "applied", "error": None})
                     applied.append({"suggestion_id": suggestion["id"], "action_id": action["id"], "status": "applied"})
                 except (OSError, ValueError, TypeError) as error:
-                    action_id = suggestion.get("action_id")
+                    action_id = action.get('id') if action else suggestion.get('action_id')
                     if action_id:
                         try:
                             act = self.store.get_file_action(action_id)
-                            if act and act.get("status") in ("proposed", "prepared"):
+                            if act and act.get("status") == 'proposed':
                                 self.store.update_file_action(action_id, {"status": "failed", "error": str(error)})
                         except Exception:
                             pass

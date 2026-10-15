@@ -1,5 +1,23 @@
 # Validation record
 
+## Update: 15 October 2026 — organizer and download watching 0.4.3
+
+- The exact staged source passed all **162 tests** on Windows x64 in
+  41.149 seconds. It excludes unrelated empty-file/duplicate-deletion work in
+  the working folder. No permanent-deletion feature was added by this update.
+- Project and destination fixtures cover existing folders across approved
+  locations, Downloads routing, multiple matching folders, preserved code trees,
+  source/destination identity, root removal, partial scans and crash recovery.
+- Watcher fixtures verify completion debouncing, changing/partial downloads,
+  pause, demo isolation, expired approvals and automatic preview generation.
+  Watching never moves a file or inherits approval from an older preview.
+- An isolated live dashboard with synthetic system readings and disposable
+  files moved five clear matches (including three Aarthika project files) and
+  restored all five with zero failures. Personal files were not sorted.
+- Folder watching checks immediate entries every two seconds and waits at
+  least four seconds of stable size/mtime. It is a polling implementation with
+  a 20,000-entry detection bound; nested arrivals need a manual rescan.
+
 ## Update: 14 October 2026 — Sort AI 0.4.1
 
 - Local Windows x64 full suite: 138 tests passed in 112.679 seconds before

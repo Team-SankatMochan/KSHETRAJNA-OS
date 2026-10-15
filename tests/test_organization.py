@@ -34,6 +34,9 @@ class OrganizationTests(unittest.TestCase):
         while self.service._active_scans:
             self.assertLess(time.monotonic(), deadline)
             time.sleep(.01)
+        worker = self.service._scan_thread
+        if worker and worker.is_alive():
+            worker.join(timeout=5)
 
     def tearDown(self):
         self.wait()
@@ -47,6 +50,10 @@ class OrganizationTests(unittest.TestCase):
         group = next(p for p in plan['report']['project_candidates'] if p['name'] == 'Aarthika')
         self.assertEqual(group['count'], 2)
         self.assertEqual(group['destinations'][0]['root_id'], self.dst)
+        project_files = [s for s in plan['suggestions'] if s['source_relative'].startswith('aarthika-')]
+        self.assertEqual(len(project_files), 2)
+        self.assertTrue(all(s['destination_root_id'] == self.dst for s in project_files))
+        self.assertTrue(all(s['destination_relative'].startswith('Aarthika/') for s in project_files))
         self.assertTrue(matches('aarthika-pitch.pptx', 'Aarthika'))
         self.assertFalse(matches('aarthika-pitch.pptx', 'art'))
 
@@ -68,15 +75,112 @@ class OrganizationTests(unittest.TestCase):
             self.assertTrue((self.source / s['source_relative']).exists())
             self.assertEqual(self.store.get_file(s['file_id'])['root_id'], self.src)
 
+    def test_named_project_scope_can_create_folder_in_an_empty_destination_root(self):
+        (self.source / 'Research-one.txt').write_text('one')
+        (self.source / 'Research-two.txt').write_text('two')
+        self.service.rescan_root(self.src)
+        self.wait()
+        self.service.save_project_scope('Research', [], self.dst, 'SpecifiedProject', confirm=True)
+
+        plan = self.service.generate_sort_plan(self.src, True)
+        project_files = [s for s in plan['suggestions'] if s.get('project_name') == 'Research']
+        self.assertEqual(len(project_files), 2)
+        self.assertTrue(all(s['destination_root_id'] == self.dst for s in project_files))
+        self.assertTrue(all(s['destination_relative'].startswith('SpecifiedProject/') for s in project_files))
+
     def test_existing_category_folder_outside_source_is_reused(self):
         (self.target / 'Pictures').mkdir()
-        plan = self.service.generate_sort_plan(self.src, True, prefer_existing=True)
+        plan = self.service.generate_sort_plan(self.src, True)
         photo = next(s for s in plan['suggestions'] if s['source_relative'] == 'holiday.jpg')
         self.assertEqual(photo['destination_root_id'], self.dst)
         result = self.service.approve_sort_idea(plan['id'], suggestion_id=photo['id'], confirm=True)
         self.assertEqual(len(result['applied']), 1)
         self.assertTrue((self.target / 'Pictures' / 'holiday.jpg').exists())
         self.service.undo_sort_plan(plan['id'])
+
+    def test_downloads_clear_files_route_to_selected_desktop_root(self):
+        desktop = self.base / 'Desktop'
+        desktop.mkdir()
+        desktop_id = self.service.add_root(str(desktop), 'Desktop')['id']
+        self.wait()
+
+        plan = self.service.generate_sort_plan(self.src, True, root_ids=[self.src, desktop_id])
+        photo = next(s for s in plan['suggestions'] if s['source_relative'] == 'holiday.jpg')
+        self.assertEqual(photo['destination_root_id'], desktop_id)
+        self.assertEqual(photo['destination_relative'], 'Pictures/holiday.jpg')
+        self.assertTrue(photo['automation_eligible'])
+
+        result = self.service.approve_sort_idea(plan['id'], suggestion_id=photo['id'], confirm=True)
+        self.assertEqual(len(result['applied']), 1)
+        self.assertTrue((desktop / 'Pictures' / 'holiday.jpg').exists())
+        self.assertFalse((self.source / 'holiday.jpg').exists())
+        self.assertEqual(self.service.undo_sort_plan(plan['id'])['status'], 'rolled_back')
+        self.assertTrue((self.source / 'holiday.jpg').exists())
+
+    def test_downloads_route_to_any_approved_desktop_by_default(self):
+        desktop = self.base / 'Desktop'
+        desktop.mkdir()
+        desktop_id = self.service.add_root(str(desktop), 'Desktop')['id']
+        self.wait()
+
+        plan = self.service.generate_sort_plan(self.src, True)
+        photo = next(s for s in plan['suggestions'] if s['source_relative'] == 'holiday.jpg')
+        self.assertEqual(photo['destination_root_id'], desktop_id)
+
+    def test_downloads_can_keep_category_moves_in_downloads_when_disabled(self):
+        desktop = self.base / 'Desktop'
+        desktop.mkdir()
+        self.service.add_root(str(desktop), 'Desktop')
+        self.wait()
+
+        plan = self.service.generate_sort_plan(self.src, True, route_downloads_to_desktop=False)
+        photo = next(s for s in plan['suggestions'] if s['source_relative'] == 'holiday.jpg')
+        self.assertEqual(photo['destination_root_id'], self.src)
+        self.assertEqual(photo['destination_relative'], 'Pictures/holiday.jpg')
+
+    def test_unavailable_desktop_is_not_used_as_an_automatic_destination(self):
+        desktop = self.base / 'Desktop'
+        desktop.mkdir()
+        desktop_id = self.service.add_root(str(desktop), 'Desktop')['id']
+        self.wait()
+        self.store.update_root_status(desktop_id, 'error', error='Desktop unavailable')
+
+        plan = self.service.generate_sort_plan(self.src, True)
+        photo = next(s for s in plan['suggestions'] if s['source_relative'] == 'holiday.jpg')
+        self.assertEqual(photo['destination_root_id'], self.src)
+
+    def test_multi_root_preview_reports_partial_source_roots(self):
+        self.store.update_root_status(self.dst, 'truncated')
+        plan = self.service.generate_sort_plan(self.src, True, root_ids=[self.src, self.dst])
+        self.assertTrue(plan['scan_partial'])
+        self.assertEqual([root['id'] for root in plan['partial_source_roots']], [self.dst])
+
+    def test_nested_review_is_opt_in_and_never_automatic(self):
+        nested = self.source / 'loose-collection'
+        nested.mkdir()
+        (nested / 'notes.txt').write_text('nested notes', encoding='utf-8')
+        self.service.rescan_root(self.src)
+        self.wait()
+
+        plan = self.service.generate_sort_plan(self.src, True, include_nested=True)
+        suggestion = next(s for s in plan['suggestions'] if s['source_relative'] == 'loose-collection/notes.txt')
+        self.assertTrue(suggestion['review_required'])
+        self.assertFalse(suggestion['automation_eligible'])
+
+    def test_advice_contains_sensitive_duplicate_and_unclear_files_only(self):
+        (self.source / '.env').write_text('TOKEN=secret\n')
+        (self.source / 'holiday (1).jpg').write_bytes(b'possible duplicate')
+        self.service.rescan_root(self.src)
+        self.wait()
+
+        plan = self.service.generate_sort_plan(self.src, True)
+        by_source = {s['source_relative']: s for s in plan['suggestions']}
+        self.assertTrue(by_source['holiday.jpg']['automation_eligible'])
+        for name in ('.env', 'holiday (1).jpg', 'unclear.bin'):
+            self.assertIn(name, by_source)
+            self.assertFalse(by_source[name]['automation_eligible'])
+            self.assertTrue(by_source[name]['review_required'])
+        self.assertGreaterEqual(plan['review_count'], 3)
 
     def test_multiple_existing_folders_need_a_choice(self):
         (self.target / 'Pictures').mkdir()

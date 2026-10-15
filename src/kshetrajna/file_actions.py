@@ -254,12 +254,13 @@ class FileActionManager:
         
         self._validate_path_safety(root_path, abs_source)
         self._validate_path_safety(destination_root, abs_dest)
-        if abs_source.stat().st_dev != abs_dest.parent.stat().st_dev:
-            raise ValueError('Cross-drive moves are not supported; choose a destination on the same drive')
         
         # Identity revalidation
         try:
             st = abs_source.stat(follow_symlinks=False)
+            if action['kind'] == 'MOVE' and st.st_dev != abs_dest.parent.stat().st_dev:
+                self.store.update_file_action(action['id'], {'status': 'failed', 'error': 'Cross-drive moves are not supported'})
+                raise ValueError('Cross-drive moves are not supported; choose a destination on the same drive')
             if hasattr(st, "st_file_attributes") and (st.st_file_attributes & 0x400):
                 self.store.update_file_action(action["id"], {"status": "failed", "error": "Source is a reparse point"})
                 raise ValueError("Source is a reparse point")

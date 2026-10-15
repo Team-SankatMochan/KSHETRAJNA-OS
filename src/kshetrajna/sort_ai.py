@@ -34,7 +34,8 @@ def build_suggestions(files: list[dict], root_path: Path, *, create_folders: boo
     Suggestions never overwrite a destination.  Missing destination folders
     are marked as blocked unless the user explicitly requested folder creation
     for this plan.  Sensitive files remain searchable but are never proposed
-    for movement by this organizer.
+    for movement by this organizer. Sensitive files are surfaced as blocked
+    advice so the automation boundary is visible without selecting them.
     """
     existing = {str(row["relative_path"]).replace('\\', '/').lower() for row in files}
     analyzed = analyze_catalog(files)
@@ -44,8 +45,32 @@ def build_suggestions(files: list[dict], root_path: Path, *, create_folders: boo
         relative = str(file_row.get("relative_path", "")).replace('\\', '/')
         extension = str(file_row.get("extension", "")).lower()
         parts = relative.split('/')
-        if not name or not relative or is_sensitive_file(name, extension, relative):
+        if not name or not relative:
             continue
+        sensitive = is_sensitive_file(name, extension, relative)
+        if sensitive:
+            # Do not infer a destination from a credential/key file. Showing it
+            # as blocked advice makes the safety boundary explicit without
+            # ever selecting it for movement.
+            parent = str(Path(relative).parent).replace('\\', '/')
+            if parent == '.':
+                parent = ''
+            insight = {
+                **insight,
+                'suggested_category': 'Document',
+                'suggested_folder': parent,
+                'suggested_destination': relative,
+                'content_summary': 'Sensitive file; content was not inspected.',
+                'content_inspected': False,
+                'review_required': True,
+                'review_reason': 'Sensitive file; inspect and place it manually if needed.',
+                'decision_confidence': 'low',
+                'decision_summary': 'Sensitive file',
+                'recommended_action': 'review',
+                'recommended_action_label': 'Review sensitive file',
+                'decision_evidence': ['The filename or path matches a protected sensitive-file rule.'],
+                'tags': [],
+            }
         loose = len(parts) == 1
         installer = extension in ('exe', 'msi', 'msix') and any(
             word in name.casefold() for word in ('setup', 'install'))
@@ -83,8 +108,11 @@ def build_suggestions(files: list[dict], root_path: Path, *, create_folders: boo
             selected = False
 
         confidence = 94 if insight.get("decision_confidence") == "high" else 88 if insight.get("decision_confidence") == "medium" else 78
-        reason = (f"Automatic decision: {insight.get('decision_summary', insight['content_summary'])}. "
-                  f"{insight['content_summary']} This supports placing it in {folder}.")
+        if sensitive:
+            reason = "Sensitive file; no automatic destination is proposed."
+        else:
+            reason = (f"Automatic decision: {insight.get('decision_summary', insight['content_summary'])}. "
+                      f"{insight['content_summary']} This supports placing it in {folder}.")
         if insight["tags"]:
             reason += " Tags: " + ", ".join(insight["tags"][:3]) + "."
         if insight["review_required"]:

@@ -297,11 +297,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 if not isinstance(ids, list) or not ids:
                     raise ValueError('Choose approved source locations')
                 self._json(200, self.server.file_service.generate_sort_plan(ids[0], body.get('create_folders', False),
-                    root_ids=ids, prefer_existing=body.get('prefer_existing', False), include_nested=body.get('include_nested', False)))
+                    root_ids=ids, prefer_existing=body.get('prefer_existing', True),
+                    include_nested=body.get('include_nested', False),
+                    route_downloads_to_desktop=body.get('route_downloads_to_desktop', True)))
             elif path == "/api/files/roots/add" and self.server.file_service:
                 if body.get("consent") is not True:
                     raise ValueError("Folder access requires explicit consent")
                 self._json(200, self.server.file_service.add_root(body.get("path"), body.get("label", "")))
+            elif path == '/api/files/roots/watch' and self.server.file_service:
+                self._json(200, self.server.file_service.set_folder_watch(body.get('root_id'), body.get('enabled')))
             elif path == "/api/files/roots/rescan" and self.server.file_service:
                 self.server.file_service.rescan_root(self._body_file_id(body, "root_id"))
                 self._json(200, {"rescanned": True})
@@ -333,7 +337,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             elif path == "/api/files/sort/preview" and self.server.file_service:
                 self._json(200, self.server.file_service.generate_sort_plan(
                     self._body_file_id(body, "root_id"), body.get("create_folders", False),
-                    prefer_existing=body.get('prefer_existing', False), include_nested=body.get('include_nested', False)))
+                    prefer_existing=body.get('prefer_existing', True), include_nested=body.get('include_nested', False),
+                    route_downloads_to_desktop=body.get('route_downloads_to_desktop', True)))
             elif path == "/api/files/sort/update" and self.server.file_service:
                 self._json(200, self.server.file_service.update_sort_plan(
                     body.get("plan_id"), body.get("suggestions")))

@@ -139,7 +139,8 @@ class FileStore:
                 'file_actions': {'destination_root_id': 'INTEGER REFERENCES roots(id)'},
                 'sort_suggestions': {'destination_root_id': 'INTEGER REFERENCES roots(id)', 'source_root_id': 'INTEGER REFERENCES roots(id)', 'project_name': "TEXT NOT NULL DEFAULT ''"},
                 'sort_plans': {'report': "TEXT NOT NULL DEFAULT '{}'"},
-                'roots': {'scan_limit': 'INTEGER NOT NULL DEFAULT 50000'},
+                'roots': {'scan_limit': 'INTEGER NOT NULL DEFAULT 50000', 'watch_enabled': 'INTEGER NOT NULL DEFAULT 0',
+                          'watch_message': "TEXT NOT NULL DEFAULT ''", 'watch_last_check': 'TEXT'},
             }.items():
                 present = {row[1] for row in db.execute(f'PRAGMA table_info({table})')}
                 for column, definition in additions.items():

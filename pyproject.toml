@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kshetrajna"
-version = "0.4.2"
+version = "0.4.3"
 description = "Local adaptive workload and file intelligence with consent, evaluation, and rollback"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
