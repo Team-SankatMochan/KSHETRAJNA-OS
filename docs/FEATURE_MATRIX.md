@@ -23,7 +23,7 @@ passed on Windows x64 and ARM64 CI; user-app mutations remain fixture-tested.
 | 9 | Local model conversation, streaming/cancellation, review-only tool planning and approved app controls | Implemented; Windows x64 fixture and local-model verification | Existing Ollama model, no API key/cloud calls; separate consent; closure/termination has no undo |
 | 9 | Semantic file embeddings / Snapdragon NPU provider | Not implemented | Core rule engine remains functional; external model runtime has its own ARM64 compatibility requirements |
 | 10 | Loopback service, Host/Origin/token checks, body bounds, static asset allowlist, local audit and migration | Verified | SQLite files are not application-encrypted |
-| 11 | Self-contained Windows x64/ARM64 archives, per-user verified setup, desktop shortcut, source launchers, graceful quit | 139-test suite and exact packaged-app checks passed on matching native Windows runners; v0.4.1 beta published | Python included; unsigned archives/setup; local model and NPU qualification separate |
+| 11 | Self-contained Windows x64/ARM64 archives, per-user verified setup, desktop shortcut, source launchers, graceful quit | 162-test suite and exact packaged-app checks passed on matching native Windows runners; v0.4.1 beta published | Python included; unsigned archives/setup; local model and NPU qualification separate |
 | Integration | Local Jarvis package, loopback HTTP client, JSON-lines bridge, preview/apply/undo commands | Verified with controlled HTTP and fixture tests | Apply/undo require explicit confirmation; no arbitrary shell or remote URL support |
 
 ## Acceptance journeys

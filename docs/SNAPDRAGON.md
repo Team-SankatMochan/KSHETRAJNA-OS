@@ -13,11 +13,11 @@ Target: **Windows 11 on ARM64, native CPython 3.13.x ARM64** (standard GIL build
 | Native priority trials | Opt-in, user-approved, off by default | Logic tested with doubles; real ARM64 actuation not independently qualified |
 | Qualcomm NPU | Not used | No NPU/TOPS score or acceleration claim |
 
-The 139-test source suite and the self-contained ARM64 package passed on a native Windows ARM64 CI runner, including read-only telemetry diagnostics. The supplied submission brief separately reports an earlier user-confirmed 61-test run on an HP Snapdragon X laptop. Generic ARM64 CI does not reproduce that device or measure its model speed, battery or NPU. **Snapdragon hardware performance needs on-device measurements.** x64 Python can run through Windows emulation; its results are not native ARM64 results. The checker uses IsWow64Process2 to distinguish these cases.
+The 162-test source suite and the self-contained ARM64 package passed on a native Windows ARM64 CI runner, including read-only telemetry diagnostics. The supplied submission brief separately reports an earlier user-confirmed 61-test run on an HP Snapdragon X laptop. Generic ARM64 CI does not reproduce that device or measure its model speed, battery or NPU. **Snapdragon hardware performance needs on-device measurements.** x64 Python can run through Windows emulation; its results are not native ARM64 results. The checker uses IsWow64Process2 to distinguish these cases.
 
 ## Download the native package
 
-Download the [v0.4.1 ARM64 archive](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.1/Kshetrajna-Windows-arm64.zip), extract it and open **Launch.cmd**. Native ARM64 Python is included. Optional **Install.cmd** creates a verified per-user copy and shortcut. See [Windows quick start](WINDOWS_QUICKSTART.md).
+Download the [v0.4.3 ARM64 archive](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.3/Kshetrajna-Windows-arm64.zip), extract it and open **Launch.cmd**. Native ARM64 Python is included. Optional **Install.cmd** creates a verified per-user copy and shortcut. See [Windows quick start](WINDOWS_QUICKSTART.md).
 
 From the extracted Kshetrajna folder, run the read-only device check:
 
@@ -43,7 +43,7 @@ python --version
 
 No pip/npm install or administrator access is needed for the source launch. If you installed several Pythons, activate an ARM64 3.13 virtual environment first so `python` selects it.
 
-The device check takes six read-only telemetry samples and runs a fixed 12,000-sample prediction benchmark. The current repository suite contains 139 tests; the submission materials refer to an earlier 61-test device run. The check does not enable continuous collection, modify priorities or load saved history. The source launcher writes `reports/device-check.json`, which Git ignores. A nonzero exit means a required check failed; the JSON identifies it. Do not describe an emulated result as native.
+The device check takes six read-only telemetry samples and runs a fixed 12,000-sample prediction benchmark. The current repository suite contains 162 tests; the submission materials refer to an earlier 61-test device run. The check does not enable continuous collection, modify priorities or load saved history. The source launcher writes `reports/device-check.json`, which Git ignores. A nonzero exit means a required check failed; the JSON identifies it. Do not describe an emulated result as native.
 
 The live app opens http://127.0.0.1:8765/. On a fresh computer, choose **Enable collection**. History belongs to that Windows user at `%LOCALAPPDATA%\Kshetrajna`, independently of the repo and this development computer. Keep priority trials off for initial qualification.
 

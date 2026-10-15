@@ -19,8 +19,8 @@ approved. Historical pitch assets are retained under [`submission/`](submission/
 ### Self-contained Windows bundles
 
 Version 0.4 adds native x64 and ARM64 packages containing Python and the app.
-Download [Intel/AMD x64](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.2/Kshetrajna-Windows-x64.zip)
-or [Snapdragon/ARM64](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.2/Kshetrajna-Windows-arm64.zip).
+Download [Intel/AMD x64](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.3/Kshetrajna-Windows-x64.zip)
+or [Snapdragon/ARM64](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/download/v0.4.3/Kshetrajna-Windows-arm64.zip).
 Extract a package and open **Launch.cmd**, or use **Install.cmd** for a verified
 per-user copy and optional desktop shortcut. Use **Quit Kshetrajna** in Privacy
 to stop the background application. See [packaging and verification](docs/WINDOWS_BUNDLES.md).
@@ -111,7 +111,7 @@ SQLite is not application-encrypted. The boundary is the current Windows user pr
 
 **Python 3.13 + standard library**, **ctypes/Win32**, **SQLite**, and **HTML/CSS/JavaScript/SVG**. There are zero runtime package dependencies. This keeps the project offline-capable and avoids architecture-specific third-party wheels. A small local HTTP server hosts the dashboard; it is not designed for public deployment.
 
-On Snapdragon X, use the ARM64 bundle or native ARM64 Python for source launch. The Windows API bindings use pointer-sized handles and counters. The 139-test source suite and packaged interpreter/dashboard passed native Windows ARM64 CI, including read-only diagnostics. The supplied submission brief separately reports an earlier user-confirmed 61-test Snapdragon run. Generic ARM64 runner compatibility is not a Snapdragon model-speed or battery benchmark. Follow [the device checks](docs/SNAPDRAGON.md) for your laptop.
+On Snapdragon X, use the ARM64 bundle or native ARM64 Python for source launch. The Windows API bindings use pointer-sized handles and counters. The 162-test source suite and packaged interpreter/dashboard passed native Windows ARM64 CI, including read-only diagnostics. The supplied submission brief separately reports an earlier user-confirmed 61-test Snapdragon run. Generic ARM64 runner compatibility is not a Snapdragon model-speed or battery benchmark. Follow [the device checks](docs/SNAPDRAGON.md) for your laptop.
 
 ## Tests
 

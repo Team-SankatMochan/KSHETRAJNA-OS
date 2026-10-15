@@ -2,6 +2,20 @@
 
 ## Update: 15 October 2026 — organizer and download watching 0.4.3
 
+- Source commit `1b0efe1` passed Windows x64, native Windows ARM64 and Linux
+  in [run 38739508828](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/actions/runs/38739508828).
+  Both exact native packages passed bundled-interpreter/app checks in
+  [run 38739508788](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/actions/runs/38739508788)
+  and were published with checksums in the
+  [v0.4.3 beta release](https://github.com/Team-SankatMochan/KSHETRAJNA-OS/releases/tag/v0.4.3).
+- The x64 package was installed locally with a new Desktop shortcut. The
+  existing file catalog was backed up before migration, and watching was
+  enabled for the previously approved Downloads location. Older versions,
+  preferences and user data were retained. No personal files were moved.
+- A fresh disposable arrival increased the live fixture's catalog from seven
+  to eight files and generated six clear matches and two advice items without
+  moving anything. The redesigned UI was visually inspected.
+
 - The exact staged source passed all **162 tests** on Windows x64 in
   41.149 seconds. It excludes unrelated empty-file/duplicate-deletion work in
   the working folder. No permanent-deletion feature was added by this update.
