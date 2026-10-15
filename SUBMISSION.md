@@ -43,7 +43,7 @@ The contribution is the complete interaction: evidence → recommendation → ex
 - README.md: quickstart, implemented phases, and limitations.
 - docs/ARCHITECTURE.md: technology choices and contracts.
 - PHASE1.md: the earlier observe-only foundation design, retained as historical context.
-- tests/: executable regression tests (85 total: 83 passed and 2 platform-specific skips in the current Linux integration run).
+- tests/: executable regression tests; current results and platform limitations are recorded in docs/VALIDATION.md.
 - .github/workflows/tests.yml: CI configuration for Windows and Linux unit/demo tests, with a conditional native ARM64 job when repository visibility and runner availability permit it.
 
 The current integration is an experimental Git snapshot for later device

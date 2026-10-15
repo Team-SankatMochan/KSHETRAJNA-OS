@@ -14,3 +14,9 @@ dist/
 reports/
 config.json
 __agent__/
+node_modules/
+.tools/
+.cache/
+.env
+.env.*
+!.env.example

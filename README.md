@@ -8,7 +8,7 @@ A local Windows workload and file assistant that observes app activity, indexes 
 separate advice queue and remembered keep decisions. Approved Downloads files
 can route into an approved Desktop, while existing folders and named project
 scopes are reused across the selected locations. Downloads discovery uses
-Windows' actual folder location. Opt-in download watching refreshes the index and Sort AI preview after new files settle. See [Sort AI setup and behavior](docs/SORT_AI.md).
+Windows' actual folder location. Opt-in download watching refreshes the index and Sort AI preview after new files settle. Empty-file and exact-duplicate cleanup is a separate reviewed action surface. See [Sort AI setup and behavior](docs/SORT_AI.md) and [cleanup integration](docs/CLEANUP.md).
 
 **Public Windows beta:** Source tests and packaged-app checks passed on native
 Windows x64 and ARM64. System modifications remain experimental and individually
@@ -86,7 +86,7 @@ Read [SUBMISSION.md](SUBMISSION.md) for a 90-second demo script and copy-ready p
 | 4 · Adapt with consent | Review/approve/dismiss, optional 60-second live Normal → Below normal priority trial, saved workspace boards within the dashboard. |
 | 5 · Evaluate and reverse | Durable decision journal, manual and timed undo, pause/shutdown restoration, startup recovery, observed before/after deltas, feedback that suppresses unwanted suggestions. |
 | 6 · Demonstrate and verify | Four synthetic scenarios, JSON report download, launch scripts, regression tests, Windows/Linux CI definition, submission guide. |
-| 7 · File Intelligence | Local file indexing, bounded excerpts, one-click previews for text/code, Office files, PDFs, and images, automatic purpose/action decisions, keyword search, content-aware review signals, metadata insights, contextual file suggestions, separate `files.db`, and a reviewed Sort AI panel. Explicit folder-access consent precedes scanning. Conversational category ideas combine path, related-file, filename, and content evidence to organize study material, project evidence, code, data, media, logs, and generated caches without silently moving or deleting files. |
+| 7 · File Intelligence | Local file indexing, bounded excerpts, one-click previews for text/code, Office files, PDFs, and images, automatic purpose/action decisions, keyword search, content-aware review signals, metadata insights, contextual file suggestions, separate `files.db`, a reviewed Sort AI panel, and explicit cleanup previews for zero-byte files and exact SHA-256 duplicates. Explicit folder-access consent precedes scanning. Conversational category ideas combine path, related-file, filename, and content evidence to organize study material, project evidence, code, data, media, logs, and generated caches without silently moving or deleting files. Cleanup never removes protected markers, sensitive files, directories, links, or the last duplicate survivor. |
 | 8 · Windows tools | Reviewed Storage settings, Disk Cleanup, Store cache, temporary-folder inspection, bounded temporary-file preview/cleanup, and one-process working-set trim. Each operation has its own scope and undo limitation. |
 
 ## Important boundaries
@@ -111,7 +111,47 @@ SQLite is not application-encrypted. The boundary is the current Windows user pr
 
 **Python 3.13 + standard library**, **ctypes/Win32**, **SQLite**, and **HTML/CSS/JavaScript/SVG**. There are zero runtime package dependencies. This keeps the project offline-capable and avoids architecture-specific third-party wheels. A small local HTTP server hosts the dashboard; it is not designed for public deployment.
 
-On Snapdragon X, use the ARM64 bundle or native ARM64 Python for source launch. The Windows API bindings use pointer-sized handles and counters. The 162-test source suite and packaged interpreter/dashboard passed native Windows ARM64 CI, including read-only diagnostics. The supplied submission brief separately reports an earlier user-confirmed 61-test Snapdragon run. Generic ARM64 runner compatibility is not a Snapdragon model-speed or battery benchmark. Follow [the device checks](docs/SNAPDRAGON.md) for your laptop.
+On Snapdragon X, use the ARM64 bundle or native ARM64 Python for source launch. The Windows API bindings use pointer-sized handles and counters. Published 0.4.3 Windows x64/ARM64 package qualification is recorded in [the validation history](docs/VALIDATION.md); it does not qualify later source changes. Current cleanup changes still require native Windows CI and device checks before release. Generic ARM64 runner compatibility is not a Snapdragon model-speed or battery benchmark. Follow [the device checks](docs/SNAPDRAGON.md) for your laptop.
+
+## Reproducible source build
+
+Use **Python 3.13.16**, pinned in `.python-version`. The application and tests
+need no third-party packages, Node.js, npm install, API keys, or `.env` loader.
+Keep the regression tests in source control; wheels and Windows bundles contain
+only the application, not test fixtures or build tools.
+
+On Linux, run the synthetic demo or offline tests directly from source:
+
+```sh
+PYTHONPATH=src python3 -m kshetrajna --demo --no-browser --port 8766
+# Open http://127.0.0.1:8766; Ctrl+C stops the isolated demo.
+make test
+```
+
+For an installable wheel, install the pinned packaging tools in a project-local
+virtual environment. Dependency download is needed once; the tests stay offline.
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-build.lock
+make build PYTHON=.venv/bin/python
+.venv/bin/python -m pip install --no-index --no-deps dist/kshetrajna-0.4.3-py3-none-any.whl
+.venv/bin/kshetrajna-sort --help
+```
+
+The `Dockerfile` runs tests in a build stage and installs only the wheel in a
+non-root runtime image. Linux Docker Engine can run the loopback-only demo:
+
+```sh
+docker build -t kshetrajna:local .
+docker run --rm --network host kshetrajna:local
+```
+
+Open `http://127.0.0.1:8766` on that Linux host. Port publishing (`-p`) does not
+expose a server bound to container loopback. Docker Desktop needs host networking
+explicitly enabled; otherwise run the source demo directly. Containers do not
+provide live Windows telemetry. Keep the real application local; only the
+synthetic `web-demo/` is suitable for public hosting (see [deployment](docs/DEPLOYMENT.md)).
 
 ## Tests
 
@@ -124,8 +164,8 @@ See [the validation record](docs/VALIDATION.md) for checks performed and remaini
 ## Jarvis and command integration
 
 The project is also a Python package with a narrow, local-only Jarvis bridge.
-It exposes named Sort AI commands rather than arbitrary shell execution. Start
-the dashboard, then use:
+It exposes named Sort AI and reviewed cleanup commands rather than arbitrary
+shell execution. Start the dashboard, then use:
 
 ```powershell
 # Discover existing conventional folders without scanning them
@@ -146,9 +186,17 @@ python -m kshetrajna.jarvis --url http://127.0.0.1:8765 sort_apply `
 # Reverse eligible changes
 python -m kshetrajna.jarvis --url http://127.0.0.1:8765 sort_undo `
   --plan-id PLAN_ID --confirm
+
+# Preview reviewed cleanup candidates (project trees stay protected)
+python -m kshetrajna.cli cleanup empty --url http://127.0.0.1:8765 --root-id 3
+python -m kshetrajna.cli cleanup duplicates --url http://127.0.0.1:8765 --root-id 3
+
+# Delete only after reviewing the preview and confirming the exact file ID
+python -m kshetrajna.cli cleanup_empty_delete --url http://127.0.0.1:8765 `
+  --file-id FILE_ID --confirm
 ```
 
-For a subprocess protocol, run `python -m kshetrajna.jarvis --url http://127.0.0.1:8765 --jsonl` and send one bounded JSON object per line, such as `{"command":"discover_folders"}`. For in-process integration, import `JarvisHttpClient` or `JarvisCommandBridge` from `kshetrajna.jarvis`. The bridge accepts loopback URLs only and requires explicit `confirm: true` for apply and undo.
+For a subprocess protocol, run `python -m kshetrajna.jarvis --url http://127.0.0.1:8765 --jsonl` and send one bounded JSON object per line, such as `{"command":"discover_folders"}`. For in-process integration, import `JarvisHttpClient` or `JarvisCommandBridge` from `kshetrajna.jarvis`. The bridge accepts loopback URLs only and requires explicit `confirm: true` for apply, undo, and cleanup deletion.
 
 Run **run_tests.cmd**, or from PowerShell:
 
@@ -157,7 +205,7 @@ $env:PYTHONPATH = 'src'
 python -m unittest discover -s tests -v
 ~~~
 
-Tests cover consent, schema migration, retention/deletion, model evidence, stale proposals, one active trial, journal-before-action ordering, expiry, restart recovery, failed restoration, feedback, workspaces, file scanning/actions, bounded UTF-8 extraction, content-aware review signals, Sort AI batch preview/apply/undo, conversational folder approval, catalog deletion protection, temporary-file scope, automatic path discovery, persisted consent, Jarvis bridge validation, malformed file API inputs, and the HTTP workflow. Native priority calls are isolated behind a driver and tested with controlled doubles; file and maintenance mutations use temporary fixtures; the demo never changes user processes. See [the validation record](docs/VALIDATION.md) for the current test count.
+Tests cover consent, schema migration, retention/deletion, model evidence, stale proposals, one active trial, journal-before-action ordering, expiry, restart recovery, failed restoration, feedback, workspaces, file scanning/actions, bounded UTF-8 extraction, content-aware review signals, Sort AI batch preview/apply/undo, conversational folder approval, empty-file and exact-duplicate cleanup, catalog deletion protection, temporary-file scope, automatic path discovery, persisted consent, Jarvis bridge validation, malformed file API inputs, private dashboard GET guards, and the HTTP workflow. Native priority calls are isolated behind a driver and tested with controlled doubles; file and maintenance mutations use temporary fixtures; the demo never changes user processes. See [the validation record](docs/VALIDATION.md) for the current test count.
 
 ## Source map
 

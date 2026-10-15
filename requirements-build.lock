@@ -1,0 +1,3 @@
+# Packaging only. Runtime and unittest checks have no third-party dependencies.
+setuptools==80.9.0
+wheel==0.45.1

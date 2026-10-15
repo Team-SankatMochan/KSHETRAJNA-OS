@@ -1,0 +1,2 @@
+# Runtime and tests use only the Python standard library; no packages to install.
+# Packaging dependencies are pinned separately in requirements-build.lock.
