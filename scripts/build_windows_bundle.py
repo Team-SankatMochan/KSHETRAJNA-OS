@@ -14,6 +14,8 @@ import urllib.parse
 import zipfile
 from pathlib import Path, PurePosixPath
 
+from release_tools import check_python, epoch, scan_bundle, zip_time
+
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON_VERSION = "3.13.16"
 RUNTIMES = {
@@ -76,6 +78,7 @@ def write_text(path: Path, text: str) -> None:
 
 
 def build(architecture: str, output: Path, *, allow_dirty=False) -> Path:
+    check_python()
     version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
     git = ["git", "-c", f"safe.directory={ROOT.as_posix()}"]
     commit = subprocess.check_output(git + ["rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
@@ -147,16 +150,19 @@ Setup: https://github.com/Team-SankatMochan/KSHETRAJNA-OS/blob/main/docs/WINDOWS
                     "architecture": architecture, "source_commit": commit, "dirty_source": dirty,
                     "python_version": PYTHON_VERSION, "runtime_url": RUNTIMES[architecture][0],
                     "runtime_sha256": RUNTIMES[architecture][1], "files": inventory}
-        (package / "bundle.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        manifest["source_date_epoch"] = epoch()
+        (package / "bundle.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n")
         with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zipped:
             for member in sorted(package.rglob("*")):
                 if not member.is_file():
                     continue
-                info = zipfile.ZipInfo("Kshetrajna/" + member.relative_to(package).as_posix(), (2026, 10, 14, 0, 0, 0))
+                info = zipfile.ZipInfo("Kshetrajna/" + member.relative_to(package).as_posix(), zip_time())
+                info.create_system = 3
                 info.compress_type = zipfile.ZIP_DEFLATED
                 info.external_attr = 0o100644 << 16
                 zipped.writestr(info, member.read_bytes())
-    output.with_suffix(output.suffix + ".sha256").write_text(f"{sha256(output)}  {output.name}\n", encoding="ascii")
+    scan_bundle(output)
+    output.with_suffix(output.suffix + ".sha256").write_text(f"{sha256(output)}  {output.name}\n", encoding="ascii", newline="\n")
     return output
 
 

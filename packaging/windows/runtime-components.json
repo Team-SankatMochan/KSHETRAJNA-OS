@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "scope": "Known components in official CPython 3.13.16 Windows embeddable packages, matched against observed native payload files. Not an exhaustive transitive inventory. Unreviewed components/files remain NOASSERTION rather than being labelled MIT.",
+  "version_sources": {
+    "x64": {"url": "https://www.python.org/ftp/python/3.13.16/python-3.13.16-embed-amd64.zip.spdx.json", "sha256": "acbd1648d27c7bc5f7e48160c8e2ad9d0b8e153ba474f03a784d71562d35eeff"},
+    "arm64": {"url": "https://www.python.org/ftp/python/3.13.16/python-3.13.16-embed-arm64.zip.spdx.json", "sha256": "4b5ebbd0269ec7192043e81b9acbe88acb81b98dea3f4e079bbe4014bb54b033"}
+  },
+  "components": [
+    {"name": "bzip2", "version": "1.0.8", "license": "bzip2-1.0.6", "evidence_files": ["_bz2.pyd"], "source": "https://github.com/python/cpython-source-deps/archive/refs/tags/bzip2-1.0.8.tar.gz", "license_source": "https://sourceware.org/bzip2/1.0.8/bzip2-manual-1.0.8.html; bundled runtime/LICENSE.txt"},
+    {"name": "libffi", "version": "3.4.4", "license": "MIT", "evidence_files": ["libffi-8.dll"], "source": "https://github.com/python/cpython-source-deps/archive/refs/tags/libffi-3.4.4.tar.gz", "license_source": "https://github.com/libffi/libffi/blob/v3.4.4/LICENSE; bundled runtime/LICENSE.txt"},
+    {"name": "OpenSSL", "version": "3.5.9", "license": "Apache-2.0", "evidence_files": ["libssl-3.dll", "libssl-3-arm64.dll"], "source": "https://github.com/python/cpython-source-deps/archive/refs/tags/openssl-3.5.9.tar.gz", "license_source": "https://github.com/openssl/openssl/blob/openssl-3.5.9/LICENSE.txt; bundled runtime/LICENSE.txt"},
+    {"name": "SQLite", "version": "3.50.4.0", "license": "LicenseRef-SQLite-Public-Domain", "evidence_files": ["sqlite3.dll"], "source": "https://github.com/python/cpython-source-deps/archive/refs/tags/sqlite-3.50.4.0.tar.gz", "license_source": "https://sqlite.org/copyright.html"},
+    {"name": "Expat", "version": "2.8.5", "license": "MIT", "evidence_files": ["pyexpat.pyd"], "source": "https://github.com/libexpat/libexpat/releases/download/R_2_8_5/expat-2.8.5.tar.gz", "license_source": "https://github.com/libexpat/libexpat/blob/R_2_8_5/expat/COPYING"},
+    {"name": "mpdecimal", "version": "4.0.0", "license": "BSD-2-Clause", "evidence_files": ["_decimal.pyd"], "source": "https://github.com/python/cpython-source-deps/archive/refs/tags/mpdecimal-4.0.0.tar.gz", "license_source": "https://www.bytereef.org/mpdecimal/"}
+  ],
+  "extracted_licenses": [
+    {"licenseId": "LicenseRef-SQLite-Public-Domain", "name": "SQLite Public Domain Dedication", "extractedText": "All of the code and documentation in SQLite has been dedicated to the public domain by the authors. All code authors, and representatives of the companies they work for, have signed affidavits dedicating their contributions to the public domain and originals of those signed affidavits are stored in a firesafe at the main offices of Hwaci. All contributors are citizens of countries that allow creative works to be dedicated into the public domain. Anyone is free to copy, modify, publish, use, compile, sell, or distribute the original SQLite code, either in source code form or as a compiled binary, for any purpose, commercial or non-commercial, and by any means.", "seeAlsos": ["https://sqlite.org/copyright.html"]}
+  ]
+}

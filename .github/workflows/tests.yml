@@ -1,57 +1,37 @@
 name: Tests
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_call:
 permissions:
   contents: read
 jobs:
-  test:
-    strategy:
-      matrix:
-        os: [windows-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          python-version-file: .python-version
-      - run: python -m unittest discover -s tests -v
-        env:
-          PYTHONPATH: src
-          PYTHONDONTWRITEBYTECODE: "1"
-      - name: Windows device smoke check (no personal history)
-        if: runner.os == 'Windows'
-        run: python -m kshetrajna.diagnostics --live
-        env:
-          PYTHONPATH: src
-          PYTHONDONTWRITEBYTECODE: "1"
-  windows-arm64:
-    # Standard hosted ARM64 runners are available for public repositories.
-    # This job is skipped for private repositories; use check_device.cmd locally.
-    if: ${{ !github.event.repository.private }}
-    runs-on: windows-11-arm
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version-file: .python-version
-          architecture: arm64
-      - run: python -m unittest discover -s tests -v
-        env:
-          PYTHONPATH: src
-          PYTHONDONTWRITEBYTECODE: "1"
-      - run: python -m kshetrajna.diagnostics --live --require-native-arm64
-        env:
-          PYTHONPATH: src
-          PYTHONDONTWRITEBYTECODE: "1"
-  package:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version-file: .python-version
-      - name: Build the wheel with pinned packaging tools
+          python-version: '3.13.16'
+      - name: Use candidate commit timestamp
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
+      - name: Offline standard-library suite
+        run: make test PYTHON=python
+      - name: Validate release configuration and pinned workflow syntax
+        run: python scripts/validate_release_config.py --download-actionlint
+      - name: Hash-locked project-local build tools
         run: |
-          python -m pip install -r requirements-build.lock
-          make build PYTHON=python
-      - name: Build the isolated non-root demo image (includes offline tests)
-        run: docker build -t kshetrajna:ci .
+          python -m venv .venv
+          .venv/bin/python -m pip install --require-hashes --only-binary=:all: --no-deps -r requirements-build.lock
+      - name: Build, scan and exercise the installed wheel
+        run: make smoke-wheel PYTHON=.venv/bin/python
+      - name: Compare two fresh unsigned wheel builds
+        run: .venv/bin/python scripts/check_reproducible.py --kind wheel --artifact dist/kshetrajna-$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')-py3-none-any.whl
+      - name: Build and run non-root Docker runtime smoke
+        run: make smoke-docker PYTHON=.venv/bin/python
+  native:
+    uses: ./.github/workflows/windows-bundles.yml

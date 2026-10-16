@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Team-SankatMochan/KSHETRAJNA-OS/packaging/windows/release-evidence.schema.json",
+  "title": "Exact signed MSI evidence (validated fail-closed by scripts/release_gate.py)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source", "packaged", "lifecycle", "authenticode", "reproducible_unsigned", "content_scan", "msi_sha256", "unsigned_payload_sha256"],
+  "properties": {
+    "source": {"$ref": "#/$defs/native"},
+    "packaged": {"$ref": "#/$defs/native"},
+    "lifecycle": {
+      "type": "object",
+      "required": ["schema", "source_commit", "architecture", "status", "standard_user", "install", "upgrade", "uninstall", "history_preserved", "msi_sha256"],
+      "properties": {
+        "schema": {"const": 1}, "source_commit": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+        "architecture": {"enum": ["x64", "arm64"]}, "status": {"const": "passed"},
+        "standard_user": {"const": true}, "history_preserved": {"const": true},
+        "install": {"const": "passed"}, "upgrade": {"const": "passed"}, "uninstall": {"const": "passed"},
+        "msi_sha256": {"$ref": "#/$defs/hash"}
+      }, "additionalProperties": false
+    },
+    "authenticode": {"const": "verified"}, "reproducible_unsigned": {"const": true},
+    "content_scan": {"const": "passed"}, "msi_sha256": {"$ref": "#/$defs/hash"},
+    "unsigned_payload_sha256": {"$ref": "#/$defs/hash"}
+  },
+  "$defs": {
+    "hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "native": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema", "source_commit", "architecture", "python", "runtime", "tests", "failures", "errors", "skips", "status"],
+      "properties": {
+        "schema": {"const": 1}, "source_commit": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+        "architecture": {"enum": ["x64", "arm64"]}, "python": {"const": "3.13.16"},
+        "runtime": {"enum": ["source", "packaged"]}, "tests": {"type": "integer", "minimum": 1},
+        "failures": {"const": 0}, "errors": {"const": 0}, "skips": {"const": 0}, "status": {"const": "passed"}
+      }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "wix": {
+    "version": "7.0.0",
+    "url": "https://api.nuget.org/v3-flatcontainer/wix/7.0.0/wix.7.0.0.nupkg",
+    "sha256": "7f992e57c356dcbda2ea961bf3b348e1bd7d31d96795be4ac391e04cf140536d",
+    "entrypoint": "tools/net8.0/any/wix.dll",
+    "release_source": "https://github.com/wixtoolset/wix/releases/tag/v7.0.0",
+    "license_source": "https://github.com/wixtoolset/wix/blob/v7.0.0/OSMFEULA.txt",
+    "requires": "Project-local pinned .NET runtime, Windows; no global tool installation"
+  },
+  "dotnet": {
+    "version": "8.0.32",
+    "source": "https://builds.dotnet.microsoft.com/dotnet/release-metadata/8.0/releases.json",
+    "x64": {
+      "url": "https://builds.dotnet.microsoft.com/dotnet/Runtime/8.0.32/dotnet-runtime-8.0.32-win-x64.zip",
+      "sha512": "f0349e793d8081c682c01d736db695c9c1ec268c6173648913543db219e44cbf2e952c7ef94fc37946b0f2bb95ca1898d972a43591b8e44d5a1659f4911904c0"
+    },
+    "arm64": {
+      "url": "https://builds.dotnet.microsoft.com/dotnet/Runtime/8.0.32/dotnet-runtime-8.0.32-win-arm64.zip",
+      "sha512": "d9adc8a9734c4ed63d96e624bc34a28e670174b0430712d7ac00769b17a976f230935dbd433a2d1bd2ab67c929c03e321543bcf6774e10ca20ad03dcfabf6e09"
+    }
+  }
+}

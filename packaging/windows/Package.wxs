@@ -1,0 +1,20 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Kshetrajna $(var.Architecture)" Manufacturer="Kshetrajna contributors"
+           Version="$(var.Version)" Language="1033" Scope="perUser"
+           UpgradeCode="$(var.UpgradeCode)" InstallerVersion="500" Compressed="yes">
+    <MajorUpgrade DowngradeErrorMessage="A newer Kshetrajna version is already installed."
+                  Schedule="afterInstallInitialize" AllowSameVersionUpgrades="no" />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="VendorFolder" Name="Kshetrajna">
+          <Directory Id="INSTALLFOLDER" Name="$(var.Architecture)" />
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+    <Feature Id="Application" Title="Kshetrajna" Level="1">
+      <ComponentGroupRef Id="Payload" />
+    </Feature>
+    <!-- No services, elevated broker, global PATH, auto-launch or user-history removal. -->
+  </Package>
+</Wix>
