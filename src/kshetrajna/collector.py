@@ -19,6 +19,8 @@ class Collector:
         self._wake = threading.Event()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._sampling = 0
+        self._probe_closed = False
         self._last_foreground: tuple[int | None, str | None] | None = None
         self._was_idle: bool | None = None
         self._active = False
@@ -27,15 +29,36 @@ class Collector:
         self.service = None
 
     def start(self) -> None:
-        if self._thread is None:
-            self._thread = threading.Thread(target=self._run, name="kshetrajna-collector", daemon=True)
-            self._thread.start()
+        with self._gate:
+            if self._thread is None:
+                thread = threading.Thread(target=self._run, name="kshetrajna-collector", daemon=True)
+                thread.start()
+                self._thread = thread
 
     def stop(self) -> None:
         self._stop.set()
         self._wake.set()
-        if self._thread:
-            self._thread.join(timeout=10)
+        thread = self._thread
+        if thread is not None:
+            if thread is threading.current_thread():
+                return
+            thread.join(timeout=10)
+            if thread.is_alive():
+                return
+        # An external sample may still hold the gate; a later stop can retry cleanup.
+        if not self._gate.acquire(blocking=False):
+            return
+        try:
+            if self._sampling or self._probe_closed:
+                return
+            if self._thread is not None and self._thread.is_alive():
+                return
+            close = getattr(self.probe, "close", None)
+            if close is not None:
+                close()
+            self._probe_closed = True
+        finally:
+            self._gate.release()
 
     def update_settings(self, patch: dict) -> Settings:
         if not isinstance(patch, dict):
@@ -83,11 +106,16 @@ class Collector:
                 self.store.prune(settings.retention_days)
                 return None
             self._active = True
-            snapshot = self.probe.sample(
-                track_processes=settings.track_processes,
-                track_foreground=settings.track_foreground,
-                max_processes=settings.max_processes,
-            )
+            self._probe_closed = False
+            self._sampling += 1
+            try:
+                snapshot = self.probe.sample(
+                    track_processes=settings.track_processes,
+                    track_foreground=settings.track_foreground,
+                    max_processes=settings.max_processes,
+                )
+            finally:
+                self._sampling -= 1
             events = self._events(snapshot, settings)
             self.store.record(snapshot, events)
             self.store.prune(settings.retention_days)
