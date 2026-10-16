@@ -10,6 +10,7 @@ from .actions import SimulatedPriorityDriver, WindowsPriorityDriver
 from .demo import SCENARIOS, seed_demo
 from .intelligence import analyze, recommend
 from .maintenance import MaintenanceService
+from . import __version__
 
 
 class AssistantService:
@@ -212,7 +213,7 @@ class AssistantService:
 
     def report(self):
         state = self.state()
-        return {"product": "Kshetrajna", "version": "0.3.0", "mode": state["mode"],
+        return {"product": "Kshetrajna", "version": __version__, "mode": state["mode"],
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "intelligence": state["intelligence"], "decisions": state["decisions"],
                 "workspaces": state["workspaces"],

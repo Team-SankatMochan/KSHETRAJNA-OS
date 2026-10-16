@@ -676,7 +676,7 @@ dialog p {
 }
 
 /* Cleanup is intentionally quieter than Sort AI: scope first, evidence second,
-   destructive action last.  Keep paths readable on narrow screens. */
+   reviewed action last. Keep paths readable on narrow screens. */
 .cleanup-grid {
   align-items: start;
 }
@@ -880,11 +880,11 @@ dialog p {
   font-size: .7rem;
   text-align: right;
 }
-.cleanup-grid button.cleanup-delete-button {
+.cleanup-grid button.cleanup-action-button {
   min-height: 40px;
   margin-top: .6rem;
 }
-.cleanup-grid button.cleanup-delete-button:disabled {
+.cleanup-grid button.cleanup-action-button:disabled {
   opacity: .45;
 }
 #cleanup-confirm-dialog {
@@ -897,6 +897,171 @@ dialog p {
 #cleanup-confirm-effect {
   margin: .85rem 0;
   overflow-wrap: anywhere;
+}
+
+/* Recovery stays in the cleanup flow, but uses a quieter evidence surface than
+   the candidate queues. The backend intentionally gives this panel labels and
+   relative paths only; no file contents are rendered here. */
+.cleanup-recovery {
+  grid-column: 1 / -1;
+  min-width: 0;
+  border-color: #394762;
+  background: linear-gradient(135deg, rgba(31, 39, 65, .75), rgba(15, 22, 36, .96));
+}
+.cleanup-recovery > .control-note {
+  max-width: 58rem;
+}
+.quarantine-list {
+  display: grid;
+  gap: .65rem;
+  min-width: 0;
+}
+.quarantine-list[aria-busy="true"] {
+  opacity: .82;
+}
+.quarantine-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(17rem, .9fr) auto;
+  align-items: start;
+  gap: 1rem;
+  min-width: 0;
+  padding: .9rem;
+  border: 1px solid #3b4865;
+  border-radius: 12px;
+  background: rgba(17, 24, 39, .84);
+}
+.quarantine-card[data-state="restored"] {
+  border-color: #36583f;
+  background: rgba(20, 42, 29, .5);
+}
+.quarantine-card[data-state="restore_failed"],
+.quarantine-card[data-state="stale"],
+.quarantine-card[data-state="collision"] {
+  border-color: rgba(255, 175, 154, .55);
+}
+.quarantine-card-heading,
+.quarantine-card-meta,
+.quarantine-card-action {
+  min-width: 0;
+}
+.quarantine-card-heading strong,
+.quarantine-card-heading small,
+.quarantine-card-meta dt,
+.quarantine-card-meta dd {
+  display: block;
+}
+.quarantine-card-heading strong {
+  overflow-wrap: anywhere;
+  color: #e4e8f4;
+  font-size: .86rem;
+}
+.quarantine-card-heading small {
+  margin-top: .3rem;
+  color: #8f9db8;
+  font-size: .72rem;
+}
+.quarantine-card-path {
+  display: block;
+  max-width: 100%;
+  margin-top: .45rem;
+  overflow-wrap: anywhere;
+  color: #c5d0e6;
+  font: .76rem/1.45 Consolas, "Courier New", monospace;
+}
+.quarantine-card-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .55rem .8rem;
+  margin: 0;
+}
+.quarantine-card-meta div {
+  min-width: 0;
+}
+.quarantine-card-meta dt {
+  color: #8291ad;
+  font-size: .62rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.quarantine-card-meta dd {
+  margin: .2rem 0 0;
+  overflow-wrap: anywhere;
+  color: #d2d9e8;
+  font-size: .76rem;
+  line-height: 1.4;
+}
+.quarantine-card-meta dd code,
+.quarantine-card-action code {
+  overflow-wrap: anywhere;
+  color: #c8bcff;
+  font: .7rem/1.4 Consolas, "Courier New", monospace;
+}
+.quarantine-card-action {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: .45rem;
+}
+.quarantine-card-action button {
+  min-width: 8rem;
+  white-space: nowrap;
+}
+.quarantine-card-action small {
+  max-width: 14rem;
+  color: #9caaca;
+  font-size: .68rem;
+  line-height: 1.45;
+}
+.quarantine-issue {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: .6rem .7rem;
+  border-left: 3px solid #ffaaa3;
+  border-radius: .35rem;
+  background: rgba(80, 39, 48, .25);
+  color: #ffc1b9;
+  font-size: .76rem;
+  line-height: 1.45;
+}
+.quarantine-partial {
+  margin: 0;
+  padding: .65rem .75rem;
+  border-left: 3px solid #e1c17d;
+  border-radius: .35rem;
+  background: rgba(225, 193, 125, .1);
+  color: #e7ca8c;
+  font-size: .76rem;
+  line-height: 1.45;
+}
+#cleanup-recovery-status[data-state="error"] {
+  color: #ffb4ad;
+}
+#cleanup-recovery-status[data-state="ready"] {
+  color: #9fdbb0;
+}
+#quarantine-restore-dialog {
+  width: min(40rem, calc(100vw - 2rem));
+}
+#quarantine-restore-copy {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+#quarantine-restore-effect {
+  margin: .85rem 0;
+  overflow-wrap: anywhere;
+}
+.quarantine-confirm-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: .6rem;
+  margin: .9rem 0;
+  color: #d0d8e7;
+  font-size: .8rem;
+  line-height: 1.45;
+}
+.quarantine-confirm-toggle input {
+  flex: 0 0 auto;
+  margin-top: .12rem;
 }
 
 @media (max-width: 980px) {
@@ -918,5 +1083,17 @@ dialog p {
     display: block;
     margin-top: .3rem;
     text-align: left;
+  }
+  .quarantine-card {
+    grid-template-columns: 1fr;
+    gap: .8rem;
+  }
+  .quarantine-card-action {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+  .quarantine-card-action button {
+    width: 100%;
   }
 }

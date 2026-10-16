@@ -60,9 +60,12 @@ File Intelligence uses `files.db` in the same directory:
 - Approved PDFs may be loaded into a sandboxed same-origin document viewer and
   have a bounded text preview extracted locally. PDF bytes are size-bounded,
   signature-checked, and never uploaded.
-- A permanently deleted reviewed file is removed from the filesystem and the
-  catalog after explicit confirmation. The action journal records the outcome,
-  but Kshetrajna cannot restore deleted content.
+- Reviewed File Intelligence cleanup moves a confirmed empty/duplicate file into
+  the protected `.kshetrajna-quarantine` directory and removes it from the
+  active catalog. The action journal stores the exact recovery record; the
+  quarantine list can restore the file after identity/content checks. The
+  separate generic file-action DELETE capability remains explicitly confirmed
+  and permanent.
 
 Deleting File Intelligence data never deletes original files. It is refused
 while file-action records still need recovery; resolve or dismiss those

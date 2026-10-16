@@ -2,7 +2,7 @@
 
 > **The intelligence that knows the field.**
 
-A local Windows workload and file assistant that observes app activity, indexes local files, recognizes workflows, explains resource recommendations, asks for consent, and records outcomes and rollback. This is the end-to-end hackathon prototype, version 0.4.3.
+A local Windows workload and file assistant that observes app activity, indexes local files, recognizes workflows, explains resource recommendations, asks for consent, and records outcomes and rollback. This is the end-to-end hackathon prototype, version 0.5.0.
 
 **Sort AI update:** Automatic batches handle clear loose-file matches, with a
 separate advice queue and remembered keep decisions. Approved Downloads files
@@ -10,9 +10,12 @@ can route into an approved Desktop, while existing folders and named project
 scopes are reused across the selected locations. Downloads discovery uses
 Windows' actual folder location. Opt-in download watching refreshes the index and Sort AI preview after new files settle. Empty-file and exact-duplicate cleanup is a separate reviewed action surface. See [Sort AI setup and behavior](docs/SORT_AI.md) and [cleanup integration](docs/CLEANUP.md).
 
-**Public Windows beta:** Source tests and packaged-app checks passed on native
-Windows x64 and ARM64. System modifications remain experimental and individually
-approved. Historical pitch assets are retained under [`submission/`](submission/README.md).
+**Current qualification:** The reviewed-cleanup and quarantine milestone has a
+local Linux x86_64 source check under CPython 3.13.16. Native Windows package,
+device, and Docker checks are not claimed for this milestone.
+The published 0.4.3 beta record is historical and does not qualify these later
+source changes. Historical pitch assets are retained under
+[`submission/`](submission/README.md).
 
 ## Run the submission now
 
@@ -28,9 +31,9 @@ These are unsigned archives; a compatible local model remains optional and separ
 
 ### Run from source on your own Windows PC
 
-The source option requires Python 3.13 (x64 for Intel/AMD, ARM64 for Snapdragon).
+The source option requires Python 3.13.16 (x64 for Intel/AMD, ARM64 for Snapdragon).
 Extract the source download and double-click **start_here.cmd**. The launcher selects
-an installed Python 3.13 and opens your own local dashboard. No Git or account
+an installed Python 3.13 installation and opens your own local dashboard. No Git or account
 is required. See [Windows quick start](docs/WINDOWS_QUICKSTART.md).
 
 Enable collection and the desired action controls locally. Ollama plus an
@@ -66,7 +69,7 @@ The provider rejects cloud models. See [local assistant setup and boundaries](do
 This is a local-model assistant, not the OpenAI ChatGPT service. The optional
 Ollama runtime/model is separate from the dependency-free Python core.
 
-Install **Python 3.13**, open this folder, and double-click **run_demo.cmd**. The browser opens at [127.0.0.1:8766](http://127.0.0.1:8766/). No packages, API keys, cloud services, or build step are required.
+Install **Python 3.13.16**, open this folder, and double-click **run_demo.cmd**. The browser opens at [127.0.0.1:8766](http://127.0.0.1:8766/). No packages, API keys, cloud services, or build step are required.
 
 The demo uses clearly labeled synthetic data in a temporary database. Its approval and rollback actions are simulated and cannot modify Windows. Closing the process removes its temporary session. Download the session report before closing if you want to keep it.
 
@@ -86,7 +89,7 @@ Read [SUBMISSION.md](SUBMISSION.md) for a 90-second demo script and copy-ready p
 | 4 · Adapt with consent | Review/approve/dismiss, optional 60-second live Normal → Below normal priority trial, saved workspace boards within the dashboard. |
 | 5 · Evaluate and reverse | Durable decision journal, manual and timed undo, pause/shutdown restoration, startup recovery, observed before/after deltas, feedback that suppresses unwanted suggestions. |
 | 6 · Demonstrate and verify | Four synthetic scenarios, JSON report download, launch scripts, regression tests, Windows/Linux CI definition, submission guide. |
-| 7 · File Intelligence | Local file indexing, bounded excerpts, one-click previews for text/code, Office files, PDFs, and images, automatic purpose/action decisions, keyword search, content-aware review signals, metadata insights, contextual file suggestions, separate `files.db`, a reviewed Sort AI panel, and explicit cleanup previews for zero-byte files and exact SHA-256 duplicates. Explicit folder-access consent precedes scanning. Conversational category ideas combine path, related-file, filename, and content evidence to organize study material, project evidence, code, data, media, logs, and generated caches without silently moving or deleting files. Cleanup never removes protected markers, sensitive files, directories, links, or the last duplicate survivor. |
+| 7 · File Intelligence | Local file indexing, bounded excerpts, one-click previews for text/code, Office files, PDFs, and images, automatic purpose/action decisions, keyword search, content-aware review signals, metadata insights, contextual file suggestions, separate `files.db`, a reviewed Sort AI panel, and explicit cleanup previews for zero-byte files and exact SHA-256 duplicates. Explicit folder-access consent precedes scanning. Conversational category ideas combine path, related-file, filename, and content evidence to organize study material, project evidence, code, data, media, logs, and generated caches without silently moving or deleting files. Cleanup never removes protected markers, sensitive files, directories, links, or the last duplicate survivor; a confirmed live cleanup moves the reviewed file into the protected `.kshetrajna-quarantine` directory and returns `deleted:true`, `quarantined:true`, and an `action_id` for recovery. |
 | 8 · Windows tools | Reviewed Storage settings, Disk Cleanup, Store cache, temporary-folder inspection, bounded temporary-file preview/cleanup, and one-process working-set trim. Each operation has its own scope and undo limitation. |
 
 ## Important boundaries
@@ -96,14 +99,14 @@ Read [SUBMISSION.md](SUBMISSION.md) for a 90-second demo script and copy-ready p
 - Live CPU trials are experimental and individually approved. They affect a single allowlisted, background process at Normal priority in the current session. PID and process creation time are checked before acting.
 - The selected process is restored to Normal on undo or expiry (checked approximately every second), when collection is paused, when live trials are disabled, on graceful shutdown, or during startup recovery. Failed restoration remains visible and keeps its recovery record.
 - If the app is forcibly killed, a priority change can persist until restart recovery or until the target exits. Newly spawned children can inherit the selected process's priority; they are outside this prototype's rollback scope.
-- No application is terminated automatically, no power plan is changed, and no elevated or real-time priority is used. Separately enabled app controls can request graceful closure or individually confirmed force termination for one verified, allowlisted background PID. Closing/termination can lose unsaved work and has no undo. An explicitly enabled Windows maintenance action can request `EmptyWorkingSet` for one eligible background process or delete reviewed, old files in the fixed `%TEMP%` location; working-set trim has no exact undo and temporary-file deletion is permanent.
+- No application is terminated automatically, no power plan is changed, and no elevated or real-time priority is used. Separately enabled app controls can request graceful closure or individually confirmed force termination for one verified, allowlisted background PID. Closing/termination can lose unsaved work and has no undo. An explicitly enabled Windows maintenance action can request `EmptyWorkingSet` for one eligible background process or delete reviewed, old files in the fixed `%TEMP%` location; working-set trim has no exact undo and temporary-file deletion is permanent. Reviewed File Intelligence cleanup is different: live cleanup moves the file into protected quarantine, and the action can be restored with its exact action ID.
 - Before/after system metrics are observations, not proof that a trial caused an improvement. Synthetic demo metrics are never benchmarks.
 
 ## Privacy and storage
 
-System Intelligence data is stored under **%LOCALAPPDATA%\Kshetrajna**. Its records contain UTC timestamps, executable basenames, PIDs and creation tokens, CPU/RAM measurements, app transitions, idle duration, workspace names, and decisions. System telemetry does not store window titles, URLs, document names, command lines, keystrokes, clipboard content, screenshots, or full executable paths. File Intelligence is a separate opt-in catalog: it stores approved root paths, relative file names/paths, metadata, bounded excerpts from allowed text files, and reviewed file-action journals; use its separate **Delete all file data** control to remove the catalog after resolving any pending file recovery records.
+System Intelligence data is stored under **%LOCALAPPDATA%\Kshetrajna**. Its records contain UTC timestamps, executable basenames, PIDs and creation tokens, CPU/RAM measurements, app transitions, idle duration, workspace names, and decisions. System telemetry does not store window titles, URLs, document names, command lines, keystrokes, clipboard content, screenshots, or full executable paths. File Intelligence is a separate opt-in catalog: it stores approved root paths, relative file names/paths, metadata, bounded excerpts from allowed text files, and reviewed file-action journals. Live cleanup moves reviewed files into the protected `.kshetrajna-quarantine` directory under their approved root; quarantine content is not indexed or offered as a cleanup candidate.
 
-Default retention is seven days, selectable from one to thirty. Pausing stops new observation; prior history remains until retention or deletion. Deletion restores active trials first, then removes observations, derived patterns, decisions, and saved workspaces. Unresolved recovery records cannot be erased through the dashboard. Diagnostic logs and preferences remain.
+Default retention is seven days, selectable from one to thirty. Pausing stops new observation; prior history remains until retention or deletion. Deletion restores active trials first, then removes observations, derived patterns, decisions, and saved workspaces. File Intelligence catalog/root deletion is blocked while unresolved file-action or quarantine records remain; restore those records first. Diagnostic logs and preferences remain. The reviewed cleanup bridge has no permanent final-purge API or CLI command; the legacy generic file-action DELETE endpoint remains a separate explicit permanent-delete capability.
 
 SQLite is not application-encrypted. The boundary is the current Windows user profile and a loopback-only HTTP service. Host checks, matching Origin, per-session tokens, strict local asset loading, and request size limits protect dashboard mutations from ordinary cross-site requests. Programs already running as the same user are not isolated from this prototype.
 
@@ -135,7 +138,7 @@ virtual environment. Dependency download is needed once; the tests stay offline.
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-build.lock
 make build PYTHON=.venv/bin/python
-.venv/bin/python -m pip install --no-index --no-deps dist/kshetrajna-0.4.3-py3-none-any.whl
+.venv/bin/python -m pip install --no-index --no-deps dist/kshetrajna-0.5.0-py3-none-any.whl
 .venv/bin/kshetrajna-sort --help
 ```
 
@@ -152,6 +155,8 @@ expose a server bound to container loopback. Docker Desktop needs host networkin
 explicitly enabled; otherwise run the source demo directly. Containers do not
 provide live Windows telemetry. Keep the real application local; only the
 synthetic `web-demo/` is suitable for public hosting (see [deployment](docs/DEPLOYMENT.md)).
+Docker build/run was unavailable in the current validation environment, so the
+commands above describe the configured path rather than a passed local check.
 
 ## Tests
 
@@ -194,9 +199,16 @@ python -m kshetrajna.cli cleanup duplicates --url http://127.0.0.1:8765 --root-i
 # Delete only after reviewing the preview and confirming the exact file ID
 python -m kshetrajna.cli cleanup_empty_delete --url http://127.0.0.1:8765 `
   --file-id FILE_ID --confirm
+
+# Review the protected quarantine record returned by that deletion
+python -m kshetrajna.cli quarantine list --url http://127.0.0.1:8765 --root-id 3
+
+# Restore the exact action; this is not a permanent final purge
+python -m kshetrajna.cli quarantine restore --url http://127.0.0.1:8765 `
+  --action-id ACTION_ID --confirm
 ```
 
-For a subprocess protocol, run `python -m kshetrajna.jarvis --url http://127.0.0.1:8765 --jsonl` and send one bounded JSON object per line, such as `{"command":"discover_folders"}`. For in-process integration, import `JarvisHttpClient` or `JarvisCommandBridge` from `kshetrajna.jarvis`. The bridge accepts loopback URLs only and requires explicit `confirm: true` for apply, undo, and cleanup deletion.
+For a subprocess protocol, run `python -m kshetrajna.jarvis --url http://127.0.0.1:8765 --jsonl` and send one bounded JSON object per line, such as `{"command":"discover_folders"}`. For in-process integration, import `JarvisHttpClient` or `JarvisCommandBridge` from `kshetrajna.jarvis`. The bridge accepts loopback URLs only and requires explicit `confirm: true` for apply, undo, cleanup quarantine, and quarantine restore. A successful live cleanup response uses `deleted:true` and `quarantined:true`; it removes the original path but does not permanently purge the content. The current bridge exposes restore, not a final-purge command. The legacy generic file-action DELETE route remains a separate permanent-delete API. The corresponding private recovery API is `GET /api/files/quarantine` followed by `POST /api/files/quarantine/restore` with `{"action_id":"ACTION_ID","confirm":true}`.
 
 Run **run_tests.cmd**, or from PowerShell:
 
@@ -205,7 +217,7 @@ $env:PYTHONPATH = 'src'
 python -m unittest discover -s tests -v
 ~~~
 
-Tests cover consent, schema migration, retention/deletion, model evidence, stale proposals, one active trial, journal-before-action ordering, expiry, restart recovery, failed restoration, feedback, workspaces, file scanning/actions, bounded UTF-8 extraction, content-aware review signals, Sort AI batch preview/apply/undo, conversational folder approval, empty-file and exact-duplicate cleanup, catalog deletion protection, temporary-file scope, automatic path discovery, persisted consent, Jarvis bridge validation, malformed file API inputs, private dashboard GET guards, and the HTTP workflow. Native priority calls are isolated behind a driver and tested with controlled doubles; file and maintenance mutations use temporary fixtures; the demo never changes user processes. See [the validation record](docs/VALIDATION.md) for the current test count.
+Tests cover consent, schema migration, retention/deletion, model evidence, stale proposals, one active trial, journal-before-action ordering, expiry, restart recovery, failed restoration, feedback, workspaces, file scanning/actions, bounded UTF-8 extraction, content-aware review signals, Sort AI batch preview/apply/undo, conversational folder approval, empty-file and exact-duplicate cleanup, quarantine listing/restoration and protected-directory behavior, catalog/root deletion protection while recovery records remain, temporary-file scope, automatic path discovery, persisted consent, Jarvis bridge validation, malformed file API inputs, private dashboard GET guards, and the HTTP workflow. Native priority calls are isolated behind a driver and tested with controlled doubles; file and maintenance mutations use temporary fixtures; the demo never changes user processes. See [the validation record](docs/VALIDATION.md) for the current test count and platform limits.
 
 ## Source map
 

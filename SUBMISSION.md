@@ -8,7 +8,7 @@ The demo is deliberately labeled synthetic. It contains fifteen minutes of recur
 
 ## Project description
 
-Kshetrajna is a privacy-first adaptive workload assistant for Windows. It observes local application activity and resource pressure, builds an explainable picture of the current workflow, and proposes changes the user can inspect and approve. Reversible priority trials have a visible journal and a route back; separate Windows maintenance tools are explicitly labeled when they have no automatic undo. The prototype connects telemetry, local behavioral statistics, recommendations, a workspace board, consent, controlled CPU-priority trials, outcome measurement, file indexing, and file-action recovery in one offline application. It is designed around Windows on ARM compatibility using native Win32 APIs and Python without third-party runtime dependencies.
+Kshetrajna is a privacy-first adaptive workload assistant for Windows. It observes local application activity and resource pressure, builds an explainable picture of the current workflow, and proposes changes the user can inspect and approve. Reversible priority trials have a visible journal and a route back; separate Windows maintenance tools are explicitly labeled when they have no automatic undo. Reviewed File Intelligence cleanup moves confirmed files into protected quarantine and exposes a list/restore path by exact action ID; this milestone has no permanent final-purge API. The prototype connects telemetry, local behavioral statistics, recommendations, a workspace board, consent, controlled CPU-priority trials, outcome measurement, file indexing, and file-action recovery in one offline application. It is designed around Windows on ARM compatibility using native Win32 APIs and Python without third-party runtime dependencies.
 
 ## A 90-second demonstration
 
@@ -21,7 +21,7 @@ Kshetrajna is a privacy-first adaptive workload assistant for Windows. It observ
 
 ## What makes the prototype useful
 
-The contribution is the complete interaction: evidence → recommendation → explicit approval → bounded trial → observation → rollback → feedback, alongside approved-folder indexing → deterministic file suggestions → editable batch preview → conflict-aware mutation → undo. Each individual mechanism already has precedents; the submission demonstrates how they can work together as a local, user-controlled Windows layer.
+The contribution is the complete interaction: evidence → recommendation → explicit approval → bounded trial → observation → rollback → feedback, alongside approved-folder indexing → deterministic file suggestions → editable batch preview → conflict-aware mutation → undo/recovery. Reviewed cleanup adds a second guarded path: preview → explicit confirmation → protected quarantine → quarantine list → restore. Each individual mechanism already has precedents; the submission demonstrates how they can work together as a local, user-controlled Windows layer.
 
 ## Judge questions
 
@@ -31,11 +31,18 @@ The contribution is the complete interaction: evidence → recommendation → ex
 
 **Does it improve performance?** No causal benchmark is claimed. The prototype records observations around a trial. Controlled A/B experiments and a latency metric are needed before making a performance claim.
 
-**What can it change?** With live opt-in and approval, it can temporarily lower one eligible background process from Normal to Below normal priority. With a separate maintenance opt-in, it can launch selected Windows cleanup tools, review/delete bounded old `%TEMP%` candidates, or request a one-process working-set trim; those actions may be irreversible and are not presented as performance guarantees. The default mode observes only. Workspace boards change the dashboard UI. File Intelligence requires explicit folder-access consent before scanning. Sort AI explains deterministic folder/file ideas in plain language and requires separate confirmation before creating a folder or moving files; conflicts are blocked before mutation.
+**What can it change?** With live opt-in and approval, it can temporarily lower one eligible background process from Normal to Below normal priority. With a separate maintenance opt-in, it can launch selected Windows cleanup tools, review/delete bounded old `%TEMP%` candidates, or request a one-process working-set trim; those actions may be irreversible and are not presented as performance guarantees. Reviewed File Intelligence cleanup is different: after preview and confirmation, the original file is moved into protected `.kshetrajna-quarantine` and the result returns `deleted:true`, `quarantined:true`, and an `action_id`. Use the quarantine list and `POST /api/files/quarantine/restore` with `{action_id,confirm:true}` to recover it. No final-purge API is exposed. The default mode observes only. Workspace boards change the dashboard UI. File Intelligence requires explicit folder-access consent before scanning. Sort AI explains deterministic folder/file ideas in plain language and requires separate confirmation before creating a folder or moving files; conflicts are blocked before mutation.
 
 **How does rollback work?** The original state is journaled before mutation, then restored on undo/expiry, pause, or graceful shutdown. Startup retries pending records after a crash. It never overwrites a priority class changed by another actor. Descendants are outside the selected-process rollback scope.
 
-**What about Snapdragon X?** The code uses standard Win32 APIs and has no third-party native wheels. The supplied project brief reports a user-confirmed 61-test run on an HP Snapdragon X ARM64 laptop. The current checkout's reproducible device report is x64, so the ARM64 claim is retained as a user-provided validation statement rather than independently reproduced here; native diagnostics and real priority actuation still require device qualification.
+For reviewed file cleanup, restoration is a separate recovery action: call
+`GET /api/files/quarantine` with the dashboard token, review the returned
+`action_id`, then call `POST /api/files/quarantine/restore` with the exact ID and
+literal `confirm:true` plus the normal same-origin request headers. Unresolved
+quarantine records block catalog/root deletion until resolved. This is restore,
+not permanent final purge.
+
+**What about Snapdragon X?** The code uses standard Win32 APIs and has no third-party native wheels. The supplied project brief reports a user-confirmed 61-test run on an HP Snapdragon X ARM64 laptop. The current quarantine validation is Linux x86_64, so that ARM64 claim is retained as a user-provided validation statement rather than independently reproduced here; native diagnostics and real priority actuation still require device qualification.
 
 ## Submission contents
 

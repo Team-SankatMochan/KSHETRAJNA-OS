@@ -2,7 +2,6 @@ import os
 import stat
 import json
 import threading
-import time
 import uuid
 import hashlib
 from datetime import datetime, timezone, timedelta
@@ -10,7 +9,7 @@ import pathlib
 from pathlib import Path, PureWindowsPath
 import logging
 
-from .file_storage import FileStore
+from .file_storage import FileStore, QUARANTINE_DIR_NAME
 from .file_scanner import (walk, extract_excerpt, extract_office_excerpt, TEXT_EXTENSIONS,
                            ScanTruncated,
                            is_sensitive_file, INSPECTION_VERSION)
@@ -32,6 +31,8 @@ PROTECTED_PREFIXES = [
 ]
 
 class FileService:
+    _SCAN_STOP_TIMEOUT = 10
+
     def __init__(self, store: FileStore, demo: bool = False):
         self.store = store
         self.demo = demo
@@ -39,6 +40,8 @@ class FileService:
         if not self.demo:
             self.action_manager.reconcile_actions()
         self._gate = threading.RLock()
+        self._scan_done = threading.Condition(self._gate)
+        self._catalog_deleting = False
         self._scan_thread: threading.Thread | None = None
         self._cancel_events: dict[int, threading.Event] = {}
         self._active_scans: set[int] = set()
@@ -60,6 +63,10 @@ class FileService:
         if isinstance(value, bool) or not isinstance(value, int) or not 0 < value <= 2**63 - 1:
             raise ValueError(f"Invalid {name}")
         return value
+
+    def _assert_catalog_available(self):
+        if self._catalog_deleting:
+            raise ValueError("File catalog deletion is in progress; retry when it finishes")
 
     @staticmethod
     def _is_reparse_point(path: Path) -> bool:
@@ -174,6 +181,7 @@ class FileService:
             raise ValueError("Roots cannot be added in demo mode")
             
         with self._gate:
+            self._assert_catalog_available()
             path = self._validate_root_path(path_str)
             root_id = self.store.add_root(str(path), label)
             self.rescan_root(root_id)
@@ -184,6 +192,7 @@ class FileService:
             raise ValueError('Approve between 1 and 20 local locations with consent=true')
         results, skipped = [], []
         with self._gate:
+            self._assert_catalog_available()
             for item in locations:
                 if not isinstance(item, dict) or not isinstance(item.get('label', ''), str):
                     raise ValueError('Invalid location')
@@ -251,8 +260,9 @@ class FileService:
     def rescan_root(self, root_id: int) -> None:
         root_id = self._positive_id(root_id, "root_id")
         with self._gate:
+            self._assert_catalog_available()
             root = self.store.get_root(root_id)
-            if not root:
+            if not root or root['status'] == 'removed':
                 raise ValueError("Root not found")
             
             if root_id in self._active_scans:
@@ -285,15 +295,17 @@ class FileService:
             # not erase a rescan requested after that terminal status appears.
 
     def _run_scan(self, root_id: int):
-        root = self.store.get_root(root_id)
-        if not root or root["status"] == "removed":
-            return
-            
-        cancel_event = self._cancel_events.get(root_id)
-        is_cancelled = lambda: cancel_event.is_set() if cancel_event else False
-        
-        start_time = datetime.now(timezone.utc).isoformat()
+        status, note = "error", None
+        count = total_size = None
         try:
+            root = self.store.get_root(root_id)
+            if not root or root["status"] == "removed":
+                status = "removed"
+                return
+
+            cancel_event = self._cancel_events.get(root_id)
+            is_cancelled = lambda: cancel_event.is_set() if cancel_event else False
+            start_time = datetime.now(timezone.utc).isoformat()
             with self.store._connect() as db:
                 db.execute("UPDATE scan_state SET started_at=?, finished_at=NULL, files_seen=0 WHERE root_id=?", (start_time, root_id))
                 last_pass = db.execute("SELECT last_pass FROM scan_state WHERE root_id=?", (root_id,)).fetchone()[0]
@@ -323,6 +335,11 @@ class FileService:
                 for rel_path, entry, info in entries:
                     if is_cancelled():
                         break
+
+                    if self._is_quarantine_relative(rel_path):
+                        # Quarantine contents are app-managed recovery data, not
+                        # user files and must never enter the file catalog.
+                        continue
 
                     seen += 1
 
@@ -386,20 +403,18 @@ class FileService:
                 count = db.execute("SELECT COUNT(*) FROM files WHERE root_id=? AND is_directory=0", (root_id,)).fetchone()[0]
                 total_size = db.execute("SELECT SUM(size_bytes) FROM files WHERE root_id=? AND is_directory=0", (root_id,)).fetchone()[0] or 0
                 
-            # Publish a terminal status only after the in-memory scan gate is
-            # cleared. Callers use both signals to decide whether mutations
-            # are safe, so they must become visible in the same order.
             messages = []
             for key, description in (('linked_or_cloud', 'linked/cloud-only entries'), ('excluded_folders', 'protected/generated folders'),
                                      ('unreadable', 'unreadable entries'), ('depth_limit', 'folders beyond the depth limit')):
                 if scan_notes.get(key):
                     messages.append(f"{scan_notes[key]} {description}")
             note = 'Skipped ' + ', '.join(messages) + '.' if messages else None
-            self._finish_scan(root_id, status, error=note, file_count=count, total_size=total_size)
             
         except Exception as e:
             logging.getLogger(__name__).exception("Scan failed")
-            self._finish_scan(root_id, "error", error=str(e))
+            status, note = "error", str(e)
+        finally:
+            self._finish_scan(root_id, status, error=note, file_count=count, total_size=total_size)
 
     def _flush_batch(self, batch):
         with self.store._connect() as db:
@@ -458,26 +473,24 @@ class FileService:
             if root_id in self._cancel_events:
                 self._cancel_events[root_id].set()
                 
-            # Wait for scan to exit before cascade delete
-            if root_id in self._active_scans:
-                def delayed_delete():
-                    while root_id in self._active_scans:
-                        time.sleep(0.1)
-                    self.store.remove_root(root_id)
-                threading.Thread(target=delayed_delete, daemon=True).start()
-            else:
+            # Active scans finish the cascade under this gate after their last write.
+            if root_id not in self._active_scans:
                 self.store.remove_root(root_id)
 
     def delete_all(self) -> None:
         with self._gate:
-            for root_id in list(self._cancel_events.keys()):
-                self._cancel_events[root_id].set()
-            
-        while self._active_scans:
-            time.sleep(0.1)
-                
-        with self._gate:
-            self.store.clear_all()
+            self._assert_catalog_available()
+            self._catalog_deleting = True
+            try:
+                for event in self._cancel_events.values():
+                    event.set()
+                # Condition.wait_for releases the gate so scans can finish.
+                if not self._scan_done.wait_for(lambda: not self._active_scans,
+                                                timeout=self._SCAN_STOP_TIMEOUT):
+                    raise ValueError("Timed out waiting for scans to stop; retry deleting the file catalog")
+                self.store.clear_all()
+            finally:
+                self._catalog_deleting = False
 
     def _sort_plan_view(self, plan: dict) -> dict:
         result = dict(plan)
@@ -1121,11 +1134,19 @@ class FileService:
     def _finish_scan(self, root_id: int, status="ready", *, error=None,
                      file_count=None, total_size=None):
         with self._gate:
-            self._active_scans.discard(root_id)
-            self._cancel_events.pop(root_id, None)
-            if file_count is not None and total_size is not None:
-                self.store.update_root_stats(root_id, file_count, total_size)
-            self.store.update_root_status(root_id, status, error)
+            try:
+                root = self.store.get_root(root_id)
+                if root and root['status'] == 'removed':
+                    self.store.remove_root(root_id)
+                elif root:
+                    if file_count is not None and total_size is not None:
+                        self.store.update_root_stats(root_id, file_count, total_size)
+                    self.store.update_root_status(root_id, status, error)
+            finally:
+                # Publish completion atomically with status/removal, even on failure.
+                self._active_scans.discard(root_id)
+                self._cancel_events.pop(root_id, None)
+                self._scan_done.notify_all()
 
     # --- File Actions ---
     def _assert_no_scan(self, root_id: int):
@@ -1168,15 +1189,80 @@ class FileService:
     def get_action_journal(self) -> list[dict]:
         return self.action_manager.get_journal()
 
+    def get_quarantine_items(self, root_id=None) -> list[dict]:
+        """Return restore metadata without exposing file contents or root paths."""
+        if root_id is not None:
+            root_id = self._positive_id(root_id, "root_id")
+            if not self.store.get_root(root_id):
+                raise ValueError("Root not found")
+        with self._gate:
+            items = []
+            for row in self.store.get_quarantine_actions(root_id):
+                size = row.get("quarantine_size")
+                if size is None:
+                    size = row.get("expected_size")
+                items.append({
+                    "action_id": row["id"],
+                    "root_id": row["root_id"],
+                    "original_root_id": row["root_id"],
+                    "original_root_label": row.get("root_label", "") or "",
+                    "original_root": {
+                        "id": row["root_id"], "label": row.get("root_label", "") or "",
+                    },
+                    "original_relative_path": row["source_relative"],
+                    "quarantine_state": row.get("quarantine_state") or row.get("status"),
+                    "status": row.get("status"),
+                    "size_bytes": size,
+                    "modified_at": row.get("original_modified_at"),
+                    "expected_mtime_ns": row.get("expected_mtime_ns"),
+                    "expected_ctime_ns": row.get("expected_ctime_ns"),
+                    "quarantine_mtime_ns": row.get("quarantine_mtime_ns"),
+                    "quarantine_ctime_ns": row.get("quarantine_ctime_ns"),
+                    "created_at": row.get("created_at"),
+                    "quarantined_at": row.get("quarantined_at"),
+                    "restored_at": row.get("restored_at"),
+                    "content_evidence": {
+                        "sha256": row.get("quarantine_sha256") or row.get("expected_sha256"),
+                        "size_bytes": size,
+                    },
+                })
+            return items
+
+    def restore_quarantined_file(self, action_id: str, *, confirm=False) -> dict:
+        if (not isinstance(action_id, str) or not action_id or len(action_id) > 200
+                or not action_id.isascii()
+                or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for character in action_id)):
+            raise ValueError("Invalid action_id")
+        if confirm is not True:
+            raise ValueError("Restoring a quarantined file requires confirm=true")
+        if self.demo:
+            raise ValueError("Restoring quarantined files is not available in demo mode")
+        action = self.store.get_file_action(action_id=action_id)
+        if not action:
+            raise ValueError("Quarantine action not found")
+        with self._gate:
+            self._assert_no_scan(action["root_id"])
+            return self.action_manager.restore_quarantined_file(action_id, confirm=True)
+
 
     # --- Empty-file operations ---
 
     # Structural and project-control names share the file-action protection list.
     _PROTECTED_CLEANUP_NAMES = PROTECTED_ACTION_NAMES
 
+    @staticmethod
+    def _is_quarantine_relative(relative_path: str) -> bool:
+        if not isinstance(relative_path, str) or "\0" in relative_path:
+            return False
+        normalized = relative_path.replace("\\", "/").strip("/").casefold()
+        prefix = QUARANTINE_DIR_NAME.casefold()
+        return normalized == prefix or normalized.startswith(prefix + "/")
+
     def _cleanup_name_is_protected(self, file: dict) -> bool:
         """Return whether a catalog row is never eligible for cleanup."""
         return (
+            self._is_quarantine_relative(file.get("relative_path", ""))
+            or
             file.get("name", "").casefold() in self._PROTECTED_CLEANUP_NAMES
             or is_sensitive_file(file.get("name", ""), file.get("extension", ""), file.get("relative_path", ""))
         )
@@ -1224,6 +1310,8 @@ class FileService:
         if not root or root.get("status") not in ("ready", "truncated"):
             return None
         root_path = pathlib.Path(root["path"])
+        if self._is_quarantine_relative(file.get("relative_path", "")):
+            return None
         full_path = root_path / file["relative_path"]
         with self.store._connect() as db:
             current = db.execute(
@@ -1301,7 +1389,7 @@ class FileService:
                     "candidate_limit": self._CLEANUP_QUERY_LIMIT}
 
     def delete_empty_file(self, file_id, *, confirm=False):
-        """Permanently delete a confirmed-empty file through the action journal."""
+        """Move a confirmed-empty file into reversible quarantine."""
         if confirm is not True:
             raise ValueError("Deleting an empty file requires confirm=true")
         file_id = self._positive_id(file_id, "file_id")
@@ -1343,10 +1431,16 @@ class FileService:
             if digest is None:
                 raise ValueError("File changed while validating its content; rescan before deleting")
             action = self.action_manager.create_proposal(
-                file_id, "DELETE", file["relative_path"], "live", expected_sha256=digest
+                file_id, "DELETE", file["relative_path"], "live", expected_sha256=digest,
+                quarantine=True,
             )
             result = self.action_manager.apply_action(action["proposal_id"])
-            return {"deleted": result.get("status") in ("applied", "deleted"), "action": result}
+            return {
+                "deleted": result.get("status") in ("applied", "deleted", "quarantined"),
+                "quarantined": result.get("status") == "quarantined",
+                "action_id": action["id"],
+                "action": result,
+            }
 
     # --- Duplicate-file operations ---
 
@@ -1494,7 +1588,7 @@ class FileService:
         }
 
     def delete_duplicate_file(self, file_id, *, confirm=False):
-        """Permanently delete one copy from a duplicate group through the journal.
+        """Move one verified duplicate copy into reversible quarantine.
 
         A live matching peer must survive the journal's final content recheck.
         """
@@ -1533,6 +1627,12 @@ class FileService:
             action = self.action_manager.create_proposal(
                 file_id, "DELETE", file["relative_path"], "live",
                 expected_sha256=digest, expected_peer_ids=peer_ids,
+                quarantine=True,
             )
             result = self.action_manager.apply_action(action["proposal_id"])
-            return {"deleted": result.get("status") in ("applied", "deleted"), "action": result}
+            return {
+                "deleted": result.get("status") in ("applied", "deleted", "quarantined"),
+                "quarantined": result.get("status") == "quarantined",
+                "action_id": action["id"],
+                "action": result,
+            }

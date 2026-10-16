@@ -41,7 +41,10 @@ SENSITIVE_NAMES = frozenset({
 SENSITIVE_EXTENSIONS = frozenset({'pem', 'key', 'p12', 'pfx', 'jks', 'keystore'})
 
 SENSITIVE_DIRS = frozenset({'.git', '.ssh', '.aws'})
-GENERATED_DIRS = frozenset({'node_modules', '.venv', 'venv', '__pycache__', '.cache', '.next'})
+GENERATED_DIRS = frozenset({
+    'node_modules', '.venv', 'venv', '__pycache__', '.cache', '.next',
+    '.kshetrajna-quarantine',
+})
 SYSTEM_DIRS = frozenset({'windows', 'program files', 'program files (x86)', 'programdata',
                          'appdata', '$recycle.bin', 'system volume information', '.codex', '.agents',
                          '.config', '.local', '.npm', '.gradle', '.android', '.dart_tool', '.pub-cache'})

@@ -50,7 +50,10 @@ class DownloadWatcher:
         if self.service.demo:
             return
         with self.service._gate:
-            roots = [r for r in self.service.store.get_roots() if r.get('watch_enabled')]
+            if self.service._catalog_deleting:
+                return
+            roots = [r for r in self.service.store.get_roots()
+                     if r.get('watch_enabled') and r['status'] != 'removed']
             active_ids = {r['id'] for r in roots}
             for stale in set(self._snapshots) - active_ids:
                 self._snapshots.pop(stale, None)

@@ -1,14 +1,53 @@
 # Validation record
 
-## Update: 15 October 2026 — reviewed cleanup and release hardening
+## Update: 16 October 2026 — phase-zero recovery stabilization
+
+This checkout now contains the reversible cleanup milestone and version 0.5.0.
+The current local full-suite check used Linux x86_64 with the pinned CPython
+3.13.16 runtime. Native Windows x64 source tests also ran with CPython 3.13.3.
+These are source checks, not signed-package, ARM64, or Docker qualification.
+
+| Check | Current result |
+|---|---|
+| `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python3.13 -m unittest discover -s tests -q` | **276 run: 274 passed, 2 Windows-only skips**, Linux CPython 3.13.16 |
+| Native Windows x64 source suite (source path set inside the Python process) | **276 passed, no skips**, CPython 3.13.3; not the pinned patch release |
+| Focused quarantine suite | 42 passed on each platform |
+| Focused cleanup, CLI, and scan-lifecycle suites | 35 cleanup, 22 CLI, and 14 scan-lifecycle cases covered by the combined suites |
+| Python/JavaScript syntax | Changed Python modules compiled; application JS passed `node --check` |
+| Release qualification | Pinned-patch Windows x64, native ARM64, Docker, exact bundle/installer smoke, signing, browser/device checks remain open gates |
+
+The quarantine contract is: reviewed empty/duplicate cleanup moves a file into
+the protected `.kshetrajna-quarantine` directory, returns `deleted:true`,
+`quarantined:true`, and an `action_id`, and exposes list/restore operations.
+Restore verifies action state, destination safety, identity, and SHA-256 content.
+Quarantine is excluded before scanner traversal and scan-limit accounting;
+unresolved records block root/catalog deletion. The legacy generic file-action
+DELETE route remains a separate permanent-delete compatibility API.
+
+No release artifact or native qualification is claimed from this local check.
+
+Phase zero fixes copy-fallback round-trip verification, large Windows file-ID
+encoding, reused catalog IDs, interrupted restore hard links, retry timestamp
+handling, prepared-before-move no-op recovery, scan/removal/deletion races, and
+CLI instance-lock errors. Copy timestamps are set through the exclusive open
+destination handle, never through a path-following fallback. Quarantine retains
+the bytes on the same volume: it is recoverability, not measured free-space gain.
+External same-user pathname/reparse races still require native hardening before
+final release; approval and privacy-contract changes belong to subsequent phases.
+
+## Historical update: 15 October 2026 — pre-quarantine release hardening
 
 This is source qualification on Linux x86_64 with **CPython 3.13.16**, not a
 new native Windows package qualification or a production-safety certification.
 
 | Check | Current result |
 |---|---|
-| `PIP_NO_INDEX=1 make test PYTHON=.venv/bin/python` | **216 tests run: 214 passed, 2 Windows-only skips**, 56.549 seconds; no external dependencies/network needed |
+| `PIP_NO_INDEX=1 make test PYTHON=.venv/bin/python` | Recorded Linux source qualification: **216 tests run: 214 passed, 2 Windows-only skips**, 56.549 seconds; no external dependencies/network needed |
 | `make build PYTHON=.venv/bin/python` | Wheel built with the exact versions in `requirements-build.lock` |
+| `PYTHONPATH=src python -m unittest discover -s tests -p 'test_quarantine.py' -v` | Recorded focused result: **13 tests passed** for quarantine move/restore, protected contents, API guards, tamper/collision handling, restart recovery, and catalog/root deletion blocking |
+| `PYTHONPATH=src python -m unittest tests.test_cli.CliParserTests tests.test_cli.BridgeValidationTests tests.test_cli.CliTransportTests -v` | Recorded focused result: **14 CLI tests passed** for aliases, typed IDs, literal confirmation, loopback transport, redaction, and safe help |
+| `PYTHONPATH=src python -m unittest discover -s tests -p 'test_cli.py' -v` | Recorded current limitation, **not a pass:** 18 tests run with 2 teardown errors because legacy fixtures call `delete_all()` while unresolved quarantine records block catalog deletion |
+| `python -m py_compile src/kshetrajna/jarvis.py src/kshetrajna/cli.py` | Recorded focused check passed for the current CLI bridge revision |
 | Installed wheel | CLI help, isolated demo startup, dashboard assets, private GET token guard, rejected invalid shutdown token and approved graceful shutdown passed |
 | Wheel inventory | Application/assets/metadata only; tests, npm tooling, caches, local databases/logs and environment files excluded |
 | Browser assets | `node --check` passed for application and hosted-demo JavaScript |
@@ -16,11 +55,21 @@ new native Windows package qualification or a production-safety certification.
 | Docker | Docker is unavailable in this verification environment; image build/run remains unverified locally and is configured in Linux CI |
 | Windows x64 / ARM64 | Not rerun locally for these changes; native source/package CI and real device checks remain release gates |
 
-Coverage includes local and real loopback cleanup previews/deletes, explicit
-typed IDs/confirmation, last-survivor retention, sensitive/project exclusions,
-stale content, unreachable/malformed dashboard responses, safe CLI help, Sort AI
-preview/apply/undo, out-of-range HTTP IDs and the packaged-app smoke protocol.
-Cleanup deletion is permanent; a journal entry does not provide an undo.
+Coverage includes local and real loopback cleanup previews/deletes, protected
+quarantine moves and restores, explicit typed action/file IDs and literal
+confirmation, last-survivor retention, sensitive/project exclusions, stale
+content, quarantine tamper/collision/missing-file handling, restart recovery,
+catalog/root deletion blocking, unreachable/malformed dashboard responses, safe
+CLI help, Sort AI preview/apply/undo, and out-of-range HTTP IDs. A successful
+live cleanup result has `deleted:true`, `quarantined:true`, and `action_id`;
+`GET /api/files/quarantine` lists recovery metadata and
+`POST /api/files/quarantine/restore` restores one exact action. No permanent
+final-purge API or CLI command is exposed.
+
+The focused CLI checks above pass. The full legacy CLI command is intentionally
+listed as not a pass because its two teardown errors exercise the new
+catalog-deletion guard rather than a successful test cleanup; those errors are
+not counted as a pass.
 
 Removed the unused local npm CLI dependency and generated bytecode/build copies.
 Regression tests remain in source control but do not ship in the wheel or native
@@ -202,7 +251,7 @@ Date: 6 October 2026. This records checks actually performed in the current deve
 | Browser interaction | Simulated approval, saved workspace activation, manual rollback and outcome display are covered by existing browser-path code; Sort AI DOM syntax was checked, while a full browser automation run was not available in this runner |
 | Browser console | Not checked in this session; dashboard scripts passed syntax checks |
 | Workflow prediction | Sequence disambiguation, idle/gap boundaries, habit drift, ambiguity abstention and chronological replay verified with synthetic histories |
-| File-action hardening | Root file/symlink rejection, scan-limit truncation, post-mutation race handling, malformed numeric API IDs, catalog-deletion protection, reviewed permanent-delete journaling, Sort AI conflict/undo fixtures, automatic purpose/action decisions, content-aware review signals, and byte-bounded UTF-8/Office/PDF/image extraction passed focused regression tests |
+| File-action hardening | Root file/symlink rejection, scan-limit truncation, post-mutation race handling, malformed numeric API IDs, protected quarantine moves/restores, quarantine tamper/collision/missing-file handling, catalog/root deletion protection, Sort AI conflict/undo fixtures, automatic purpose/action decisions, content-aware review signals, and byte-bounded UTF-8/Office/PDF/image extraction passed focused regression tests |
 | Repository whitespace | `git diff --check` passed for the experimental snapshot |
 
 The journal displays before/after observations with an explicit noncausal
@@ -218,18 +267,23 @@ Snapdragon computer. See [device setup and interpretation](SNAPDRAGON.md).
 
 ## Reproduce
 
-1. Run `run_tests.cmd` from the repository.
-2. Run `run_demo.cmd` and follow `SUBMISSION.md` for the demo flow.
-3. Run `run.cmd` for real Windows observations; explicitly enable collection in Privacy controls. Live priority trials remain off unless separately enabled and individually approved.
+1. Use CPython **3.13.16**, pinned in `.python-version`.
+2. From an offline Linux checkout with the project build environment, run
+   `PIP_NO_INDEX=1 make test PYTHON=.venv/bin/python`.
+3. For the focused recovery checks, run the two `unittest` commands listed in
+   the current-results table above.
+4. On Windows, `run_tests.cmd`, `run_demo.cmd`, and `run.cmd` remain available;
+   native package/device results for this quarantine milestone are not claimed
+   by this Linux record.
 
 ## Current qualification still required
 
-- Native ARM64 CI diagnostics passed; specific Snapdragon device measurements and external model inference still need on-device checks. The historical 61-test user report is separate evidence.
+- Native ARM64 diagnostics, Windows package checks, and specific Snapdragon device measurements were not rerun for this quarantine milestone; they remain release gates. The historical 61-test user report is separate evidence.
 - Real process priority changes were not executed against user applications during validation; native behavior was tested with controlled doubles.
-- Remote source and native package CI passed as linked above. No controlled device performance benchmark, battery measurement or production security audit has been completed.
+- No current native Windows CI, Docker build/run, controlled device performance benchmark, battery measurement, or production security audit is claimed here.
 - Workspace adaptation currently changes the dashboard board. It does not arrange desktop windows or launch applications.
 - Sort AI uses deterministic path, sibling, metadata, and bounded local text heuristics for purpose/action explanations and cautious review prompts; it is not semantic model inference and cannot guarantee truth from a 4 KiB preview. No model download, NPU runtime, or accelerated provider is included.
-- The unsigned self-contained x64/ARM64 artifacts passed native package checks. Signed MSI/EXE installers, auto-updates and model/NPU qualification are not implemented.
+- Historical unsigned self-contained x64/ARM64 artifacts remain documented above; they do not qualify this milestone. Signed MSI/EXE installers, auto-updates and model/NPU qualification are not implemented.
 - Recovery restores the selected process. Descendant inheritance and recovery while the app remains crashed need further engineering.
 
 This is an end-to-end hackathon prototype covering the project phases, with these limits stated explicitly; it is not a production operating system.

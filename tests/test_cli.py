@@ -19,6 +19,7 @@ from kshetrajna.config import ConfigStore
 from kshetrajna.demo import DemoProbe
 from kshetrajna.file_service import FileService
 from kshetrajna.file_storage import FileStore
+from kshetrajna.instance import InstanceLock
 from kshetrajna.server import DashboardServer
 from kshetrajna.storage import EventStore
 
@@ -209,6 +210,66 @@ class CliTransportTests(unittest.TestCase):
         self.assertFalse(json.loads(output)["ok"])
         self.assertNotIn("private initialization detail", output + errors)
 
+    def test_busy_data_directory_returns_safe_json_and_preserves_the_owner_lock(self):
+        with tempfile.TemporaryDirectory(prefix="private-cli-data-") as temporary:
+            directory = Path(temporary)
+            owner = InstanceLock(directory)
+            try:
+                for wrapper in (False, True):
+                    for arguments in (["empty_preview"], ["--jsonl"]):
+                        with self.subTest(wrapper=wrapper, arguments=arguments):
+                            status, output, errors = run_main(
+                                [*arguments, "--data-dir", str(directory)], wrapper=wrapper,
+                                stdin='{"command":"empty_preview"}\n')
+                            self.assertEqual(status, 2)
+                            result = json.loads(output)
+                            self.assertFalse(result["ok"])
+                            self.assertIn("--url", result["error"])
+                            self.assertIn("stop", result["error"].lower())
+                            self.assertIn("instance", result["error"].lower())
+                            self.assertNotIn(str(directory), output + errors)
+                            self.assertNotIn("Traceback", output + errors)
+                            self.assertEqual(errors, "")
+                            self.assertFalse(owner.file.closed)
+                            self.assertFalse((directory / "files.db").exists())
+                with self.assertRaises(RuntimeError):
+                    InstanceLock(directory)
+            finally:
+                owner.close()
+            self.assertTrue(owner.file.closed)
+
+            for arguments in (["empty_preview"], ["--jsonl"]):
+                status, output, errors = run_main(
+                    [*arguments, "--data-dir", str(directory)],
+                    stdin='{"command":"empty_preview"}\n')
+                self.assertEqual(status, 0, output + errors)
+                self.assertTrue(json.loads(output)["ok"])
+                self.assertEqual(errors, "")
+                released = InstanceLock(directory)
+                released.close()
+
+    def test_lock_acquisition_failure_never_exposes_raw_private_details(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.object(
+                jarvis, "InstanceLock", side_effect=RuntimeError("private lock detail")):
+            status, output, errors = run_main(["empty_preview", "--data-dir", temporary])
+        self.assertEqual(status, 2)
+        self.assertFalse(json.loads(output)["ok"])
+        self.assertIn("--url", json.loads(output)["error"])
+        self.assertNotIn("private lock detail", output + errors)
+        self.assertNotIn("Traceback", output + errors)
+        self.assertEqual(errors, "")
+
+    def test_unrelated_runtime_errors_propagate_and_release_the_local_lock(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            for target, attribute in ((jarvis, "FileStore"), (jarvis.JarvisCommandBridge, "execute")):
+                with self.subTest(stage=attribute), patch.object(
+                        target, attribute, side_effect=RuntimeError("unrelated execution failure")):
+                    with self.assertRaisesRegex(RuntimeError, "unrelated execution failure"):
+                        run_main(["empty_preview", "--data-dir", str(directory)])
+                released = InstanceLock(directory)
+                released.close()
+
     def test_initialization_transport_failures_never_expose_raw_errors(self):
         for error in (URLError("private transport detail"), IncompleteRead(b"private transport detail")):
             with self.subTest(error=type(error).__name__), patch.object(jarvis, "urlopen", side_effect=error):
@@ -287,6 +348,12 @@ class CliLocalServiceTests(unittest.TestCase):
         if self.files._scan_thread:
             self.files._scan_thread.join(timeout=5)
         if self.files.store.get_roots():
+            for item in self.files.get_quarantine_items():
+                if item.get("quarantine_state") in ("quarantined", "restore_failed"):
+                    try:
+                        self.files.restore_quarantined_file(item["action_id"], confirm=True)
+                    except ValueError:
+                        pass
             self.files.delete_all()
 
     def invoke(self, arguments, *, url=None, wrapper=False, stdin=""):
@@ -296,6 +363,15 @@ class CliLocalServiceTests(unittest.TestCase):
         self.assertNotIn("PRIVATE_TEST_VALUE", output)
         self.assertNotIn("not-for-output", output)
         return status, json.loads(output)
+
+    def test_local_bridge_holds_the_shared_data_directory_lock(self):
+        bridge, temporary = jarvis._build_local_bridge(self.data, False)
+        self.assertIsNone(temporary)
+        try:
+            with self.assertRaisesRegex(RuntimeError, "already using this data directory"):
+                InstanceLock(self.data)
+        finally:
+            bridge._instance_lock.close()
 
     def test_local_previews_persist_and_only_explicit_confirmed_deletes_mutate(self):
         status, preview = self.invoke(["cleanup", "empty", "--root-id", str(self.root_id), "--confirm"], wrapper=True)

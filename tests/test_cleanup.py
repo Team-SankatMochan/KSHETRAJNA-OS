@@ -35,7 +35,16 @@ class TestEmptyFileDetection(unittest.TestCase):
         self.root_path.mkdir()
 
     def tearDown(self):
+        self._resolve_quarantine()
         self.service.delete_all()
+
+    def _resolve_quarantine(self):
+        for item in self.service.get_quarantine_items().copy():
+            if item.get("quarantine_state") in ("quarantined", "restore_failed"):
+                try:
+                    self.service.restore_quarantined_file(item["action_id"], confirm=True)
+                except ValueError:
+                    pass
 
     def _wait_scan(self, root_id):
         while True:
@@ -274,7 +283,16 @@ class TestDuplicateFileDetection(unittest.TestCase):
         self.root_path.mkdir()
 
     def tearDown(self):
+        self._resolve_quarantine()
         self.service.delete_all()
+
+    def _resolve_quarantine(self):
+        for item in self.service.get_quarantine_items().copy():
+            if item.get("quarantine_state") in ("quarantined", "restore_failed"):
+                try:
+                    self.service.restore_quarantined_file(item["action_id"], confirm=True)
+                except ValueError:
+                    pass
 
     def _wait_scan(self, root_id):
         while True:
@@ -498,6 +516,12 @@ class TestCleanupHTTP(unittest.TestCase):
         self.thread.join(timeout=3)
         self.server.server_close()
         if self.files.store.get_roots():
+            for item in self.files.get_quarantine_items():
+                if item.get("quarantine_state") in ("quarantined", "restore_failed"):
+                    try:
+                        self.files.restore_quarantined_file(item["action_id"], confirm=True)
+                    except ValueError:
+                        pass
             self.files.delete_all()
 
     def call(self, path, body, *, token=True):

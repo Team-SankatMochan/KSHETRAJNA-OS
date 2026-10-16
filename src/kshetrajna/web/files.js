@@ -1256,6 +1256,13 @@ let cleanupData = {empty: null, duplicates: null};
 let pendingCleanupApproval = null;
 let cleanupApprovalReturnFocus = null;
 let cleanupStateWasScanning = false;
+let quarantineData = null;
+let quarantineBusy = false;
+let quarantineListStale = false;
+let quarantineRequestVersion = 0;
+let quarantineIssues = new Map();
+let pendingQuarantineRestore = null;
+let quarantineRestoreReturnFocus = null;
 
 function fmtBytes(n) {
   const size = Number(n);
@@ -1396,16 +1403,21 @@ function syncCleanupControls(state = currentFilesState) {
   const roots = state?.roots || [];
   const anyScanActive = roots.some(root => ['pending', 'scanning'].includes(root.status));
   const info = cleanupScopeInfo();
-  const disabled = cleanupBusy || anyScanActive;
+  const disabled = cleanupBusy || quarantineBusy || anyScanActive;
   const scope = $('cleanup-scope');
   if (scope) scope.disabled = disabled;
   for (const id of ['cleanup-scan-empty', 'cleanup-scan-dup']) {
     const control = $(id);
     if (control) control.disabled = disabled || !info.ready;
   }
-  document.querySelectorAll('#cleanup .cleanup-delete-button').forEach(control => {
+  document.querySelectorAll('#cleanup .cleanup-action-button').forEach(control => {
     control.disabled = disabled;
   });
+  document.querySelectorAll('#cleanup .quarantine-restore-button').forEach(control => {
+    control.disabled = disabled || quarantineListStale;
+  });
+  const recoveryRefresh = $('cleanup-recovery-refresh');
+  if (recoveryRefresh) recoveryRefresh.disabled = disabled || !state;
 }
 
 function cleanupLoading(list, message) {
@@ -1424,7 +1436,7 @@ function cleanupEmptyState(list, message) {
 }
 
 function cleanupOutcome(subject) {
-  return `${subject} deleted permanently. The action journal records the result for audit; Kshetrajna cannot undo this deletion.`;
+  return `${subject} moved to app-managed quarantine. Restore is available from Recovery while its record remains unresolved.`;
 }
 
 function finishCleanupApproval(approved) {
@@ -1441,17 +1453,17 @@ function requestCleanupApproval(kind, file, detail) {
   const path = cleanupExactPath(file);
   cleanupApprovalReturnFocus = document.activeElement;
   if (!dialog?.showModal) {
-    setCleanupFeedback('This browser cannot open the required in-app confirmation. No file was deleted.', true);
+    setCleanupFeedback('This browser cannot open the required in-app confirmation. No file was moved to quarantine.', true);
     return Promise.resolve(false);
   }
   if (pendingCleanupApproval) finishCleanupApproval(false);
-  $('cleanup-confirm-title').textContent = kind === 'duplicate' ? 'Delete this duplicate copy?' : 'Delete this zero-byte file?';
+  $('cleanup-confirm-title').textContent = kind === 'duplicate' ? 'Move this duplicate copy to quarantine?' : 'Move this zero-byte file to quarantine?';
   $('cleanup-confirm-copy').textContent = detail;
   $('cleanup-confirm-effect').replaceChildren(
     element('strong', kind === 'duplicate' ? 'EXACT SHA-256 DUPLICATE' : 'ZERO-BYTE CANDIDATE', 'eyebrow'),
     element('code', path),
   );
-  $('cleanup-confirm-mode').textContent = 'Deletion is permanent and cannot be undone. The action journal records the result for audit only.';
+  $('cleanup-confirm-mode').textContent = 'The reviewed file moves into app-managed quarantine. Restore is available while its recovery record remains unresolved; any final purge semantics are controlled by the backend.';
   dialog.showModal();
   $('cleanup-confirm-cancel')?.focus();
   return new Promise(resolve => { pendingCleanupApproval = resolve; });
@@ -1489,9 +1501,9 @@ function renderEmptyList(files) {
       element('span', 'Size is exactly 0 bytes. This is not a duplicate match.', 'cleanup-evidence'),
     );
     const actions = element('div', null, 'control-actions');
-    const deleteButton = button('Review deletion', async () => {
+    const deleteButton = button('Review quarantine', async () => {
       await deleteCleanupFile('empty', file, entry, deleteButton);
-    }, 'danger cleanup-delete-button');
+    }, 'primary cleanup-action-button');
     actions.append(deleteButton);
     entry.append(actions);
     list.append(entry);
@@ -1553,9 +1565,9 @@ function renderDuplicateGroups(data) {
       );
       if (!isKeep) {
         const actions = element('div', null, 'control-actions');
-        const deleteButton = button('Review deletion', async () => {
+        const deleteButton = button('Review quarantine', async () => {
           await deleteCleanupFile('duplicate', file, entry, deleteButton, group);
-        }, 'danger cleanup-delete-button');
+        }, 'primary cleanup-action-button');
         actions.append(deleteButton);
         entry.append(actions);
       }
@@ -1586,6 +1598,310 @@ async function refreshCleanupList(kind) {
   }
   renderCleanupSummary();
   return data;
+}
+
+function quarantineState(item) {
+  return String(item?.quarantine_state || item?.status || 'unknown').trim().toLowerCase() || 'unknown';
+}
+
+function quarantineStateLabel(state) {
+  const labels = {
+    quarantined: 'READY TO RESTORE',
+    restore_failed: 'RESTORE NEEDS ATTENTION',
+    restore_prepared: 'RESTORE IN PROGRESS',
+    restored: 'RESTORED',
+    quarantine_failed: 'QUARANTINE FAILED',
+    stale: 'STALE RECOVERY RECORD',
+    collision: 'RESTORE BLOCKED BY COLLISION',
+  };
+  return labels[state] || state.replaceAll('_', ' ').toUpperCase();
+}
+
+function quarantineRootLabel(item) {
+  const root = item?.original_root || {};
+  const label = item?.original_root_label || root.label;
+  if (label) return String(label);
+  const rootId = item?.original_root_id ?? item?.root_id;
+  return rootId ? `Approved location #${rootId}` : 'Approved location';
+}
+
+function quarantineTimestamp(item) {
+  const value = item?.quarantined_at || item?.created_at;
+  if (!value || Number.isNaN(Date.parse(String(value)))) return 'Timestamp unavailable';
+  return timeLabel(value);
+}
+
+function quarantineIssueFor(actionId) {
+  return quarantineIssues.get(String(actionId)) || null;
+}
+
+function classifyQuarantineRestoreError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  if (message.includes('occup') || message.includes('collision') || message.includes('already indexed')
+      || message.includes('already in use')) {
+    return {
+      state: 'collision',
+      message: 'Restore blocked: the original destination is occupied or already indexed. Nothing was overwritten; move the newer file or rescan, then try again.',
+    };
+  }
+  if (message.includes('missing') || message.includes('stale') || message.includes('changed')
+      || message.includes('identity') || message.includes('content') || message.includes('not found')) {
+    return {
+      state: 'stale',
+      message: 'Restore blocked: this recovery record is stale or its file evidence is no longer available. Refresh the recovery list before trying again.',
+    };
+  }
+  return {
+    state: 'restore_failed',
+    message: 'Restore could not complete. The file remains in quarantine; refresh the recovery list and try again when the location is ready.',
+  };
+}
+
+function quarantineListFromResponse(data) {
+  if (Array.isArray(data)) {
+    const items = data.filter(item => item && typeof item === 'object');
+    return {items, partial: items.length !== data.length};
+  }
+  if (data && Array.isArray(data.items)) {
+    const items = data.items.filter(item => item && typeof item === 'object');
+    return {
+      items,
+      partial: Boolean(data.partial || data.truncated || data.items_partial || items.length !== data.items.length),
+    };
+  }
+  throw new Error('The recovery service returned an invalid list.');
+}
+
+function quarantineStatusText(items) {
+  const restoreable = items.filter(item => [
+    'quarantined', 'restore_failed', 'quarantine_failed', 'quarantine_conflict',
+  ].includes(quarantineState(item)) && item.action_id).length;
+  const recordLabel = `${items.length} recovery record${items.length === 1 ? '' : 's'}`;
+  return restoreable ? `${recordLabel} · ${restoreable} available to restore` : recordLabel;
+}
+
+function renderQuarantineItems(data, staleMessage = '') {
+  const list = $('cleanup-recovery-list');
+  const status = $('cleanup-recovery-status');
+  if (!list) return;
+  const normalized = quarantineListFromResponse(data);
+  const items = normalized.items;
+  list.replaceChildren();
+  list.setAttribute('aria-busy', 'false');
+  if (status) {
+    status.textContent = staleMessage ? 'STALE LIST' : quarantineStatusText(items);
+    status.dataset.state = staleMessage ? 'error' : 'ready';
+  }
+  if (staleMessage) list.append(element('p', staleMessage, 'quarantine-partial'));
+  if (normalized.partial) {
+    list.append(element('p', 'This recovery list is partial. Refresh before making a restore decision; records not shown here are unchanged.', 'quarantine-partial'));
+  }
+  if (!items.length) {
+    cleanupEmptyState(list, 'No recovery records are available. Reviewed cleanup items will appear here after they move into quarantine.');
+    return;
+  }
+  for (const item of items) {
+    const actionId = String(item.action_id || '');
+    const baseState = quarantineState(item);
+    const issue = quarantineIssueFor(actionId);
+    const visualState = issue?.state || baseState;
+    const card = element('article', null, 'quarantine-card');
+    card.dataset.state = visualState;
+    const heading = element('div', null, 'quarantine-card-heading');
+    heading.append(
+      element('strong', item.original_relative_path || 'Relative path unavailable'),
+      element('small', `Original root: ${quarantineRootLabel(item)}`),
+      element('code', item.original_relative_path || 'Relative path unavailable', 'quarantine-card-path'),
+    );
+    const meta = document.createElement('dl');
+    meta.className = 'quarantine-card-meta';
+    const addMeta = (label, value, code = false) => {
+      const wrapper = document.createElement('div');
+      const description = element('dd');
+      description.append(code ? element('code', value) : document.createTextNode(value));
+      wrapper.append(element('dt', label), description);
+      meta.append(wrapper);
+    };
+    addMeta('Size', item.size_bytes == null ? 'Size unavailable' : fmtBytes(item.size_bytes));
+    addMeta('Quarantined', quarantineTimestamp(item));
+    addMeta('State', quarantineStateLabel(visualState));
+    addMeta('Action ID', actionId || 'Unavailable', true);
+    const actions = element('div', null, 'quarantine-card-action');
+    const canRestore = [
+      'quarantined', 'restore_failed', 'quarantine_failed', 'quarantine_conflict',
+    ].includes(baseState) && Boolean(actionId);
+    if (canRestore) {
+      const restoreButton = button(baseState === 'restore_failed' || issue ? 'Retry restore' : 'Restore file', () => {
+        openQuarantineRestore(item, restoreButton);
+      }, 'secondary quarantine-restore-button');
+      actions.append(restoreButton);
+    } else if (['quarantined', 'restore_failed'].includes(baseState) && !actionId) {
+      actions.append(element('small', 'Restore is unavailable because this recovery record has no action identifier.'));
+    } else if (baseState === 'restored') {
+      actions.append(element('small', 'This record is resolved. The file was restored to its original path.'));
+    } else if (baseState === 'restore_prepared') {
+      actions.append(element('small', 'Restore is being reconciled. Controls stay closed until the record settles.'));
+    } else if (baseState === 'stale') {
+      actions.append(element('small', 'Restore is blocked because this record or its source evidence is stale.'));
+    } else if (baseState === 'collision') {
+      actions.append(element('small', 'Restore is blocked because the original destination is occupied. Nothing was overwritten.'));
+    } else if (baseState === 'quarantine_failed') {
+      actions.append(element('small', 'Quarantine did not complete. Review the action journal or refresh for the backend state.'));
+    } else {
+      actions.append(element('small', 'This record is not currently eligible for restore.'));
+    }
+    card.append(heading, meta, actions);
+    if (issue) card.append(element('p', issue.message, 'quarantine-issue'));
+    list.append(card);
+  }
+  syncCleanupControls();
+}
+
+async function refreshQuarantineList() {
+  const list = $('cleanup-recovery-list');
+  const status = $('cleanup-recovery-status');
+  if (!list) return null;
+  const requestVersion = ++quarantineRequestVersion;
+  quarantineBusy = true;
+  syncCleanupControls();
+  list.setAttribute('aria-busy', 'true');
+  if (!quarantineData) list.replaceChildren(element('p', 'Loading recovery records…', 'cleanup-loading'));
+  if (status) {
+    status.textContent = 'LOADING…';
+    status.dataset.state = 'loading';
+  }
+  try {
+    const response = await request('/api/files/quarantine');
+    if (requestVersion !== quarantineRequestVersion) return null;
+    quarantineData = quarantineListFromResponse(response);
+    quarantineListStale = false;
+    // A successful refresh is authoritative for records that still exist.
+    const visibleItems = new Map(quarantineData.items.map(item => [String(item.action_id || ''), item]));
+    quarantineIssues = new Map([...quarantineIssues].filter(([id]) => {
+      const item = visibleItems.get(id);
+      return item && quarantineState(item) !== 'restored';
+    }));
+    renderQuarantineItems(quarantineData);
+    return response;
+  } catch (error) {
+    if (requestVersion !== quarantineRequestVersion) return null;
+    if (quarantineData?.items) {
+      quarantineListStale = true;
+      renderQuarantineItems(quarantineData, 'Recovery list could not refresh. Showing the last known records; restore controls are paused until the service responds.');
+    } else {
+      quarantineListStale = true;
+      list.replaceChildren(element('p', `Recovery list unavailable: ${error.message}. Retry when the local app is running.`, 'cleanup-error'));
+      list.setAttribute('aria-busy', 'false');
+      if (status) {
+        status.textContent = 'RECOVERY ERROR';
+        status.dataset.state = 'error';
+      }
+    }
+    throw error;
+  } finally {
+    if (requestVersion === quarantineRequestVersion) {
+      quarantineBusy = false;
+      syncCleanupControls();
+    }
+  }
+}
+
+async function refreshCleanupPreviews() {
+  const kinds = [];
+  if (cleanupData.empty) kinds.push('empty');
+  if (cleanupData.duplicates) kinds.push('duplicates');
+  await Promise.all(kinds.map(async kind => {
+    try {
+      await refreshCleanupList(kind);
+    } catch (error) {
+      const isEmpty = kind === 'empty';
+      const list = $(isEmpty ? 'cleanup-empty-list' : 'cleanup-dup-list');
+      const status = $(isEmpty ? 'cleanup-empty-status' : 'cleanup-dup-status');
+      cleanupError(list, `The cleanup preview is stale and could not refresh: ${error.message}.`);
+      if (status) status.textContent = 'PREVIEW STALE';
+    }
+  }));
+}
+
+function openQuarantineRestore(item, trigger) {
+  if (cleanupBusy || quarantineBusy || cleanupScopeInfo().globalScanning) return;
+  const dialog = $('quarantine-restore-dialog');
+  if (!dialog?.showModal) {
+    setCleanupFeedback('This browser cannot open the required restore confirmation. The file remains in quarantine.', true);
+    return;
+  }
+  if (pendingQuarantineRestore) closeQuarantineRestoreDialog(false);
+  pendingQuarantineRestore = {item, trigger};
+  quarantineRestoreReturnFocus = trigger || document.activeElement;
+  const path = item.original_relative_path || 'Relative path unavailable';
+  $('quarantine-restore-copy').textContent = `Restore this reviewed file to its original relative path?\n\n${path}\n\nOriginal root: ${quarantineRootLabel(item)}`;
+  $('quarantine-restore-effect').replaceChildren(
+    element('strong', 'RECOVERY RECORD', 'eyebrow'),
+    element('code', String(item.action_id || 'Action ID unavailable')),
+  );
+  $('quarantine-restore-feedback').textContent = '';
+  $('quarantine-restore-feedback').style.color = '';
+  $('quarantine-restore-check').checked = false;
+  $('quarantine-restore-confirm').disabled = true;
+  dialog.showModal();
+  $('quarantine-restore-check').focus();
+}
+
+function closeQuarantineRestoreDialog(returnFocus = true) {
+  const dialog = $('quarantine-restore-dialog');
+  if (dialog?.open) dialog.close();
+  pendingQuarantineRestore = null;
+  const check = $('quarantine-restore-check');
+  const confirmButton = $('quarantine-restore-confirm');
+  if (check) check.checked = false;
+  if (confirmButton) confirmButton.disabled = true;
+  if (returnFocus) {
+    const fallback = document.body.contains(quarantineRestoreReturnFocus)
+      ? quarantineRestoreReturnFocus
+      : $('cleanup-recovery-refresh');
+    fallback?.focus();
+  }
+  quarantineRestoreReturnFocus = null;
+}
+
+async function restoreQuarantinedFile() {
+  const pending = pendingQuarantineRestore;
+  const check = $('quarantine-restore-check');
+  if (!pending || cleanupBusy || !check?.checked) return;
+  const actionId = String(pending.item.action_id || '');
+  const confirmButton = $('quarantine-restore-confirm');
+  const cancelButton = $('quarantine-restore-cancel');
+  cleanupBusy = true;
+  if (confirmButton) confirmButton.disabled = true;
+  if (cancelButton) cancelButton.disabled = true;
+  $('quarantine-restore-feedback').textContent = 'Verifying the recovery record and restoring the file…';
+  syncCleanupControls();
+  try {
+    const result = await post('/api/files/quarantine/restore', {action_id: actionId, confirm: true});
+    if (result.status !== 'restored') throw new Error(result.message || 'The backend did not confirm restore.');
+    quarantineIssues.delete(actionId);
+    closeQuarantineRestoreDialog();
+    setCleanupFeedback('File restored to its original relative path.');
+  } catch (error) {
+    const issue = classifyQuarantineRestoreError(error);
+    quarantineIssues.set(actionId, issue);
+    $('quarantine-restore-feedback').textContent = issue.message;
+    $('quarantine-restore-feedback').style.color = '#ffb4ad';
+    if (confirmButton) confirmButton.disabled = !check.checked;
+    if (quarantineData) renderQuarantineItems(quarantineData);
+  }
+  if (!quarantineIssues.has(actionId)) {
+    try {
+      await refreshFiles();
+      await refreshQuarantineList();
+      await refreshCleanupPreviews();
+    } catch (error) {
+      setCleanupFeedback('File restored to its original relative path, but the recovery or cleanup preview needs a refresh.', true);
+    }
+  }
+  cleanupBusy = false;
+  if (cancelButton) cancelButton.disabled = false;
+  syncCleanupControls();
 }
 
 async function scanCleanup(kind) {
@@ -1621,11 +1937,11 @@ async function deleteCleanupFile(kind, file, entry, deleteButton, group = null) 
   const approvalScope = $('cleanup-scope')?.value || 'all';
   const path = cleanupExactPath(file);
   const detail = kind === 'duplicate'
-    ? `Review this exact duplicate before deleting it. Another copy in this SHA-256 group will remain in this review.\n\n${path}\n\nHash: ${group?.sha256 || 'verified by the scan'}`
-    : `Review this zero-byte candidate before deleting it. Protected structural markers are excluded from this list.\n\n${path}\n\nRecorded size: 0 bytes`;
+    ? `Review this exact duplicate before moving it to app-managed quarantine. Another copy in this SHA-256 group will remain in this review.\n\n${path}\n\nHash: ${group?.sha256 || 'verified by the scan'}`
+    : `Review this zero-byte candidate before moving it to app-managed quarantine. Protected structural markers are excluded from this list.\n\n${path}\n\nRecorded size: 0 bytes`;
   if (!await requestCleanupApproval(kind, file, detail)) return;
   if (approvalScope !== ($('cleanup-scope')?.value || 'all') || cleanupScopeInfo().globalScanning) {
-    setCleanupFeedback('The cleanup scope changed or a scan started while approval was open. No file was deleted; scan the current scope again.', true);
+    setCleanupFeedback('The cleanup scope changed or a scan started while approval was open. No file was moved to quarantine; scan the current scope again.', true);
     return;
   }
   cleanupBusy = true;
@@ -1635,18 +1951,31 @@ async function deleteCleanupFile(kind, file, entry, deleteButton, group = null) 
   try {
     const endpoint = kind === 'duplicate' ? '/api/files/duplicates/delete' : '/api/files/empty/delete';
     result = await post(endpoint, {file_id: file.id, confirm: true});
-    if (!result.deleted) throw new Error(result.action?.message || result.message || 'The backend did not confirm deletion.');
-    await refreshFiles();
-    // Re-query the same scope after every mutation. This removes stale paths,
-    // re-evaluates duplicate groups, and makes a survivor visible again.
-    await refreshCleanupList(kind);
-    setCleanupFeedback(cleanupOutcome(kind === 'duplicate' ? 'Duplicate copy' : 'Zero-byte file'));
-  } catch (error) {
-    if (result?.deleted) {
-      setCleanupFeedback(`${cleanupOutcome(kind === 'duplicate' ? 'Duplicate copy' : 'Zero-byte file')} The list refresh needs attention: ${error.message}`, true);
-    } else {
-      setCleanupFeedback(`Delete failed: ${error.message}. No success was recorded.`, true);
-    }
+     if (!result.deleted) throw new Error(result.action?.message || result.message || 'The cleanup action was not confirmed.');
+     if (result.quarantined !== true || !result.action_id) {
+       throw new Error('The cleanup service did not return a recovery record; no quarantine result was confirmed.');
+     }
+     await refreshFiles();
+     // Re-query the same scope after every mutation. This removes stale paths,
+     // re-evaluates duplicate groups, and makes a survivor visible again.
+     let refreshProblem = '';
+     try {
+       await refreshCleanupList(kind);
+     } catch (error) {
+       refreshProblem = ` Cleanup preview refresh needs attention: ${error.message}`;
+     }
+     try {
+       await refreshQuarantineList();
+     } catch (error) {
+       refreshProblem = `${refreshProblem} Recovery list refresh needs attention: ${error.message}`;
+     }
+     setCleanupFeedback(`${cleanupOutcome(kind === 'duplicate' ? 'Duplicate copy' : 'Zero-byte file')}${refreshProblem}`, Boolean(refreshProblem));
+   } catch (error) {
+     if (result?.deleted) {
+       setCleanupFeedback(`The cleanup response was received, but recovery could not be confirmed: ${error.message}`, true);
+     } else {
+       setCleanupFeedback(`Cleanup could not move the file to quarantine: ${error.message}. No success was recorded.`, true);
+     }
     if (entry) entry.classList.add('cleanup-delete-failed');
   } finally {
     cleanupBusy = false;
@@ -1697,5 +2026,21 @@ $('cleanup-confirm-dialog')?.addEventListener('close', () => {
   if (cleanupApprovalReturnFocus && document.body.contains(cleanupApprovalReturnFocus)) cleanupApprovalReturnFocus.focus();
   cleanupApprovalReturnFocus = null;
 });
-document.addEventListener('kshetrajna-files-state', event => renderCleanupFromFileState(event.detail));
+$('quarantine-restore-check')?.addEventListener('change', event => {
+  const confirmButton = $('quarantine-restore-confirm');
+  if (confirmButton) confirmButton.disabled = !event.target.checked || cleanupBusy;
+});
+$('quarantine-restore-confirm')?.addEventListener('click', restoreQuarantinedFile);
+$('quarantine-restore-cancel')?.addEventListener('click', () => closeQuarantineRestoreDialog());
+$('cleanup-recovery-refresh')?.addEventListener('click', () => refreshQuarantineList().catch(() => {}));
+$('quarantine-restore-dialog')?.addEventListener('cancel', event => {
+  event.preventDefault();
+  closeQuarantineRestoreDialog();
+});
+document.addEventListener('kshetrajna-files-state', event => {
+  renderCleanupFromFileState(event.detail);
+  // File state is the gate for the cleanup view. Keep recovery metadata on the
+  // same lifecycle without blocking the broader file-state refresh.
+  refreshQuarantineList().catch(() => {});
+});
 renderCleanupFromFileState(currentFilesState);

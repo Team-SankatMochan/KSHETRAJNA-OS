@@ -201,7 +201,7 @@
         <article class="panel">
           <div class="panel-head"><div><p class="eyebrow">CLEANUP / ZERO-BYTE FILES</p><h2>Empty Files</h2></div><span class="quiet" id="cleanup-empty-status" role="status" aria-live="polite">SCAN REQUIRED</span></div>
           <p class="cleanup-scope-note" id="cleanup-empty-scope">Scope: all approved locations</p>
-          <p class="control-note">These are <strong>zero-byte candidates</strong>, not duplicate matches. Structural markers such as <code>__init__.py</code>, <code>.gitkeep</code>, <code>.keep</code>, and <code>py.typed</code> stay protected and are excluded. Deletion is permanent and cannot be undone; the action journal is an audit record only.</p>
+          <p class="control-note">These are <strong>zero-byte candidates</strong>, not duplicate matches. Structural markers such as <code>__init__.py</code>, <code>.gitkeep</code>, <code>.keep</code>, and <code>py.typed</code> stay protected and are excluded. Reviewed cleanup moves a file into app-managed quarantine so it can be restored while its recovery record remains unresolved.</p>
           <div class="control-actions" style="margin-bottom:0.75rem;">
             <button type="button" id="cleanup-scan-empty" class="secondary" disabled>Find empty files</button>
           </div>
@@ -210,15 +210,21 @@
         <article class="panel">
           <div class="panel-head"><div><p class="eyebrow">CLEANUP / DUPLICATES</p><h2>Duplicate Files</h2></div><span class="quiet" id="cleanup-dup-status" role="status" aria-live="polite">SCAN REQUIRED</span></div>
           <p class="cleanup-scope-note" id="cleanup-dup-scope">Scope: all approved locations</p>
-          <p class="control-note">These are <strong>exact-content duplicates</strong>: each group has identical bytes verified by the full SHA-256 digest. Matching names or sizes alone do not qualify. One copy is marked keep. Deletion is permanent and cannot be undone; the action journal is an audit record only.</p>
+          <p class="control-note">These are <strong>exact-content duplicates</strong>: each group has identical bytes verified by the full SHA-256 digest. Matching names or sizes alone do not qualify. One copy is marked keep. Reviewed cleanup moves the selected copy into app-managed quarantine so it can be restored while its recovery record remains unresolved.</p>
           <div class="control-actions" style="margin-bottom:0.75rem;">
             <button type="button" id="cleanup-scan-dup" class="secondary" disabled>Find duplicates</button>
           </div>
           <div id="cleanup-dup-summary" class="sort-plan-meta" style="margin-bottom:0.5rem;"></div>
           <div id="cleanup-dup-list" class="sort-suggestions" aria-live="polite" aria-busy="false"><p class="empty">Choose an approved scope, then scan for exact SHA-256 duplicates.</p></div>
         </article>
+        <article class="panel cleanup-recovery">
+          <div class="panel-head"><div><p class="eyebrow">CLEANUP / RECOVERY</p><h2>Quarantine &amp; restore</h2></div><span class="quiet" id="cleanup-recovery-status" role="status" aria-live="polite">LOADING…</span></div>
+          <p class="control-note">Reviewed cleanup items stay in an app-managed quarantine instead of being erased. Restore returns a file to its original relative path while the record is unresolved. This panel does not offer final purge; any final purge semantics are controlled by the backend.</p>
+          <div class="control-actions quarantine-toolbar"><button type="button" id="cleanup-recovery-refresh" class="secondary" disabled>Refresh recovery list</button></div>
+          <div id="cleanup-recovery-list" class="quarantine-list" aria-busy="true"><p class="cleanup-loading">Loading recovery records…</p></div>
+        </article>
       </section>
-      <footer><span>KSHETRAJNA / HACKATHON PROTOTYPE v0.4.3</span><span>LOCAL INTELLIGENCE · EXPLICIT CONSENT · AUDITABLE ACTIONS</span></footer>
+      <footer><span>KSHETRAJNA / HACKATHON PROTOTYPE v0.5.0</span><span>LOCAL INTELLIGENCE · EXPLICIT CONSENT · AUDITABLE ACTIONS</span></footer>
     </main>
   </div>
   <dialog id="approval-dialog"><p class="eyebrow">REVIEW BEFORE APPROVAL</p><h2 id="approval-title"></h2><p id="approval-reason"></p><div id="approval-effect" class="approval-effect"></div><p id="approval-mode" class="control-note"></p><p class="control-note">Undo is available in the journal. A live trial restores this PID only; newly spawned child processes may inherit its priority. If the app crashes, restart it to attempt recovery.</p><div class="control-actions"><button id="confirm-trial" class="primary">Approve 60-second trial</button><button id="cancel-trial" class="secondary">Cancel</button></div></dialog>
@@ -230,14 +236,24 @@
   <dialog id="sort-confirm-dialog" aria-labelledby="sort-confirm-title"><p class="eyebrow">SORT AI / ONE BATCH APPROVAL</p><h2 id="sort-confirm-title"></h2><p id="sort-confirm-copy" style="white-space: pre-line"></p><div class="control-actions"><button id="sort-confirm-approve" type="button" class="primary">Approve</button><button id="sort-confirm-cancel" type="button" class="secondary">Cancel</button></div></dialog>
   <dialog id="locations-dialog" aria-labelledby="locations-title"><p class="eyebrow">ONE LOCAL ACCESS APPROVAL</p><h2 id="locations-title">Choose your scan scope</h2><p>Index selected folders locally, up to 200,000 files per location. Reads metadata and bounded allowed excerpts. No files move during scanning; no uploads or administrator privileges.</p><label class="scope-all"><input type="checkbox" id="locations-all"> Select available locations</label><div id="locations-list" class="locations-list"></div><p class="control-note">Up to 20 non-overlapping locations. Existing approved folders and their children are reused. System/app data, protected files, links, cloud-only files and inaccessible paths are skipped. Scans can be cancelled in the library.</p><p id="locations-feedback" class="feedback" role="status"></p><div class="control-actions"><button type="button" id="locations-confirm" class="primary">Approve selected locations & scan</button><button type="button" id="locations-cancel" class="secondary">Cancel</button></div></dialog>
    <dialog id="sort-destination-dialog"><p class="eyebrow">CHOOSE A HOME</p><h2>Move this reviewed file</h2><p id="destination-source"></p><label class="input-label">Approved destination location<select id="destination-root"></select></label><label class="input-label">Folder inside the location<input id="destination-folder" placeholder="Projects/Aarthika"></label><p class="control-note">The original filename is preserved. No overwriting; eligible moves can be undone.</p><div class="control-actions"><button type="button" id="destination-confirm" class="primary">Review this destination</button><button type="button" id="destination-cancel" class="secondary">Cancel</button></div><p id="destination-feedback" class="feedback" role="status"></p></dialog>
-   <dialog id="cleanup-confirm-dialog" aria-labelledby="cleanup-confirm-title" aria-describedby="cleanup-confirm-copy">
-     <p class="eyebrow">CLEANUP / FINAL REVIEW</p>
-     <h2 id="cleanup-confirm-title">Confirm file deletion</h2>
-     <p id="cleanup-confirm-copy"></p>
-     <div id="cleanup-confirm-effect" class="approval-effect"></div>
-      <p id="cleanup-confirm-mode" class="control-note">Deletion is permanent and cannot be undone. The action journal records the result for audit only.</p>
-     <div class="control-actions"><button type="button" id="cleanup-confirm-delete" class="danger">Delete this file</button><button type="button" id="cleanup-confirm-cancel" class="secondary">Keep file</button></div>
-   </dialog>
+    <dialog id="cleanup-confirm-dialog" aria-labelledby="cleanup-confirm-title" aria-describedby="cleanup-confirm-copy">
+      <p class="eyebrow">CLEANUP / RECOVERY REVIEW</p>
+      <h2 id="cleanup-confirm-title">Move this file to quarantine?</h2>
+      <p id="cleanup-confirm-copy"></p>
+      <div id="cleanup-confirm-effect" class="approval-effect"></div>
+       <p id="cleanup-confirm-mode" class="control-note">The reviewed file moves into app-managed quarantine. Restore is available while its recovery record remains unresolved; any final purge semantics are controlled by the backend.</p>
+      <div class="control-actions"><button type="button" id="cleanup-confirm-delete" class="primary">Move to quarantine</button><button type="button" id="cleanup-confirm-cancel" class="secondary">Keep file</button></div>
+    </dialog>
+    <dialog id="quarantine-restore-dialog" aria-labelledby="quarantine-restore-title" aria-describedby="quarantine-restore-copy">
+      <p class="eyebrow">CLEANUP / RECOVERY REVIEW</p>
+      <h2 id="quarantine-restore-title">Restore this file?</h2>
+      <p id="quarantine-restore-copy"></p>
+      <div id="quarantine-restore-effect" class="approval-effect"></div>
+      <label class="quarantine-confirm-toggle"><input type="checkbox" id="quarantine-restore-check"> <span>I understand this returns the file to its original relative path without overwriting a newer file.</span></label>
+      <p id="quarantine-restore-mode" class="control-note">The backend verifies the recovery record, file identity, content evidence, and destination safety before restoring.</p>
+      <div class="control-actions"><button type="button" id="quarantine-restore-confirm" class="primary" disabled>Restore file</button><button type="button" id="quarantine-restore-cancel" class="secondary">Keep in quarantine</button></div>
+      <p id="quarantine-restore-feedback" class="feedback" role="alert"></p>
+    </dialog>
    <div id="toast" role="status" hidden></div>
 </body>
 </html>

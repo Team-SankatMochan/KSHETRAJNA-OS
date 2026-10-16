@@ -132,7 +132,9 @@ flowchart LR
     ApproveMove([Approve one folder/file idea])
     CreateFolder([Create destination folder])
     Move([Move file with journal])
-    Delete([Permanently delete reviewed file])
+    Quarantine([Review cleanup and quarantine file])
+    Restore([Restore quarantined file])
+    LegacyDelete([Legacy generic permanent DELETE API])
     Undo([Undo an eligible move])
     DeleteCatalog([Delete catalog data only])
 
@@ -143,7 +145,9 @@ flowchart LR
     User --> Plan
     User --> ApproveMove
     User --> Undo
-    User --> Delete
+    User --> Quarantine
+    User --> Restore
+    User --> LegacyDelete
     User --> DeleteCatalog
 
     ApproveRoot -. includes .-> Scan
@@ -155,14 +159,17 @@ flowchart LR
     OpenPreview -. may open .-> K
     ApproveMove -. includes .-> CreateFolder
     ApproveMove -. includes .-> Move
-    Review -. may lead to .-> Delete
+    Review -. may lead to .-> Quarantine
+    Quarantine -. creates recovery record .-> Restore
     Move -. records .-> K
     Undo -. uses journal .-> K
     K --> Scan
     K --> Inspect
     K --> Plan
     K --> Move
-    K --> Delete
+    K --> Quarantine
+    K --> Restore
+    K --> LegacyDelete
 ```
 
 ## Content-review boundary

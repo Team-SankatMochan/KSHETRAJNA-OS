@@ -5,12 +5,26 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+QUARANTINE_DIR_NAME = ".kshetrajna-quarantine"
+
+
 def escape_like(query: str) -> str:
     """Escape LIKE wildcards."""
     return query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
 
 
 class FileStore:
+    @staticmethod
+    def _not_quarantine_sql(alias: str = "") -> str:
+        field = f"{alias}.relative_path" if alias else "relative_path"
+        normalized = f"lower(replace({field}, char(92), '/'))"
+        return f"({normalized} != ? AND {normalized} NOT LIKE ?)"
+
+    @staticmethod
+    def _not_quarantine_params() -> tuple[str, str]:
+        prefix = QUARANTINE_DIR_NAME.casefold()
+        return prefix, prefix + "/%"
+
     def __init__(self, path: Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -91,9 +105,21 @@ class FileStore:
                     undone_at            TEXT,
                     
                     status               TEXT NOT NULL,
-                    error                TEXT,
-                    mode                 TEXT NOT NULL
-                );
+                     error                TEXT,
+                     mode                 TEXT NOT NULL,
+                     quarantine_requested INTEGER NOT NULL DEFAULT 0,
+                     quarantine_state     TEXT NOT NULL DEFAULT '',
+                     quarantine_relative TEXT,
+                     quarantine_size     INTEGER,
+                     quarantine_mtime_ns INTEGER,
+                     quarantine_ctime_ns INTEGER,
+                     quarantine_dev      INTEGER,
+                     quarantine_ino      INTEGER,
+                     quarantine_sha256   TEXT,
+                     quarantined_at      TEXT,
+                     restored_at         TEXT,
+                     original_modified_at TEXT
+                 );
 
                 CREATE TABLE IF NOT EXISTS sort_plans (
                     id             TEXT PRIMARY KEY,
@@ -149,6 +175,23 @@ class FileStore:
                 for column, definition in additions.items():
                     if column not in present:
                         db.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
+            action_columns = {row[1] for row in db.execute("PRAGMA table_info(file_actions)")}
+            for column, definition in {
+                'quarantine_requested': 'INTEGER NOT NULL DEFAULT 0',
+                'quarantine_state': "TEXT NOT NULL DEFAULT ''",
+                'quarantine_relative': 'TEXT',
+                'quarantine_size': 'INTEGER',
+                'quarantine_mtime_ns': 'INTEGER',
+                'quarantine_ctime_ns': 'INTEGER',
+                'quarantine_dev': 'INTEGER',
+                'quarantine_ino': 'INTEGER',
+                'quarantine_sha256': 'TEXT',
+                'quarantined_at': 'TEXT',
+                'restored_at': 'TEXT',
+                'original_modified_at': 'TEXT',
+            }.items():
+                if column not in action_columns:
+                    db.execute(f'ALTER TABLE file_actions ADD COLUMN {column} {definition}')
             db.execute('''CREATE TABLE IF NOT EXISTS organization_projects (
                 id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE,
                 aliases TEXT NOT NULL DEFAULT '[]', root_id INTEGER NOT NULL REFERENCES roots(id),
@@ -212,7 +255,7 @@ class FileStore:
     def remove_root(self, root_id: int) -> None:
         with self._connect() as db:
             unresolved = db.execute(
-                "SELECT COUNT(*) FROM file_actions WHERE (root_id=? OR destination_root_id=?) AND status IN ('proposed','prepared','active','applied','undo_failed')",
+                "SELECT COUNT(*) FROM file_actions WHERE (root_id=? OR destination_root_id=?) AND (status IN ('proposed','prepared','active','applied','undo_failed') OR (quarantine_requested=1 AND COALESCE(quarantine_state,'') NOT IN ('','dismissed','restored')))",
                 (root_id, root_id),
             ).fetchone()[0]
             if unresolved:
@@ -225,11 +268,11 @@ class FileStore:
         with self._connect() as db:
             if root_id is None:
                 row = db.execute(
-                    "SELECT 1 FROM file_actions WHERE status IN ('proposed','prepared','active','applied','undo_failed') LIMIT 1"
+                    "SELECT 1 FROM file_actions WHERE status IN ('proposed','prepared','active','applied','undo_failed') OR (quarantine_requested=1 AND COALESCE(quarantine_state,'') NOT IN ('','dismissed','restored')) LIMIT 1"
                 ).fetchone()
             else:
                 row = db.execute(
-                    "SELECT 1 FROM file_actions WHERE (root_id=? OR destination_root_id=?) AND status IN ('proposed','prepared','active','applied','undo_failed') LIMIT 1",
+                    "SELECT 1 FROM file_actions WHERE (root_id=? OR destination_root_id=?) AND (status IN ('proposed','prepared','active','applied','undo_failed') OR (quarantine_requested=1 AND COALESCE(quarantine_state,'') NOT IN ('','dismissed','restored'))) LIMIT 1",
                     (root_id, root_id),
                 ).fetchone()
             return row is not None
@@ -237,7 +280,7 @@ class FileStore:
     def clear_all(self) -> None:
         with self._connect() as db:
             unresolved = db.execute(
-                "SELECT COUNT(*) FROM file_actions WHERE status IN ('proposed','prepared','active','applied','undo_failed')"
+                "SELECT COUNT(*) FROM file_actions WHERE status IN ('proposed','prepared','active','applied','undo_failed') OR (quarantine_requested=1 AND COALESCE(quarantine_state,'') NOT IN ('','dismissed','restored'))"
             ).fetchone()[0]
             if unresolved:
                 raise ValueError("Resolve file action recovery records before deleting the file catalog")
@@ -257,28 +300,32 @@ class FileStore:
             if root_id is not None:
                 rows = db.execute(
                     "SELECT f.id, f.root_id, r.path AS root_path, f.relative_path, f.name, f.extension, f.size_bytes, f.modified_at, f.mime_guess, f.excerpt "
-                    "FROM files f JOIN roots r ON r.id=f.root_id WHERE f.root_id=? AND (f.name LIKE ? ESCAPE '\\' OR f.relative_path LIKE ? ESCAPE '\\' OR f.excerpt LIKE ? ESCAPE '\\') LIMIT ?",
-                    (root_id, safe_q, safe_q, safe_q, limit)
+                    "FROM files f JOIN roots r ON r.id=f.root_id WHERE f.root_id=? AND "
+                    + self._not_quarantine_sql("f") + " AND (f.name LIKE ? ESCAPE '\\' OR f.relative_path LIKE ? ESCAPE '\\' OR f.excerpt LIKE ? ESCAPE '\\') LIMIT ?",
+                    (root_id, *self._not_quarantine_params(), safe_q, safe_q, safe_q, limit)
                 ).fetchall()
             else:
                 rows = db.execute(
                     "SELECT f.id, f.root_id, r.path AS root_path, f.relative_path, f.name, f.extension, f.size_bytes, f.modified_at, f.mime_guess, f.excerpt "
-                    "FROM files f JOIN roots r ON r.id=f.root_id WHERE f.name LIKE ? ESCAPE '\\' OR f.relative_path LIKE ? ESCAPE '\\' OR f.excerpt LIKE ? ESCAPE '\\' LIMIT ?",
-                    (safe_q, safe_q, safe_q, limit)
+                    "FROM files f JOIN roots r ON r.id=f.root_id WHERE " + self._not_quarantine_sql("f") + " AND (f.name LIKE ? ESCAPE '\\' OR f.relative_path LIKE ? ESCAPE '\\' OR f.excerpt LIKE ? ESCAPE '\\') LIMIT ?",
+                    (*self._not_quarantine_params(), safe_q, safe_q, safe_q, limit)
                 ).fetchall()
             return [dict(row) for row in rows]
 
     def get_file(self, file_id: int) -> dict | None:
         with self._connect() as db:
-            row = db.execute("SELECT * FROM files WHERE id=?", (file_id,)).fetchone()
+            row = db.execute(
+                "SELECT * FROM files WHERE id=? AND " + self._not_quarantine_sql(),
+                (file_id, *self._not_quarantine_params()),
+            ).fetchone()
             return dict(row) if row else None
 
     def get_recent_files(self, root_id: int, limit: int = 50) -> list[dict]:
         with self._connect() as db:
             rows = db.execute(
                 "SELECT id, root_id, relative_path, name, extension, size_bytes, modified_at, mime_guess "
-                "FROM files WHERE root_id=? ORDER BY modified_at DESC LIMIT ?",
-                (root_id, limit)
+                "FROM files WHERE root_id=? AND " + self._not_quarantine_sql() + " ORDER BY modified_at DESC LIMIT ?",
+                (root_id, *self._not_quarantine_params(), limit)
             ).fetchall()
             return [dict(row) for row in rows]
 
@@ -292,7 +339,8 @@ class FileStore:
         with self._connect() as db:
             rows = db.execute(
                 "SELECT id, root_id, relative_path, name, extension, size_bytes, modified_at, mime_guess, excerpt "
-                "FROM files ORDER BY modified_at DESC LIMIT ?", (limit,)
+                "FROM files WHERE " + self._not_quarantine_sql() + " ORDER BY modified_at DESC LIMIT ?",
+                (*self._not_quarantine_params(), limit)
             ).fetchall()
             return [dict(row) for row in rows]
 
@@ -302,7 +350,9 @@ class FileStore:
                 "SELECT f.id, f.root_id, r.path AS root_path, r.label AS root_label, "
                 "f.relative_path, f.name, f.extension, f.size_bytes, f.modified_at, f.excerpt, f.inspection_version "
                 "FROM files f JOIN roots r ON r.id=f.root_id "
-                "WHERE f.is_directory=0 ORDER BY f.modified_at DESC LIMIT ?", (limit,)
+                "WHERE f.is_directory=0 AND " + self._not_quarantine_sql("f") +
+                " ORDER BY f.modified_at DESC LIMIT ?",
+                (*self._not_quarantine_params(), limit)
             ).fetchall()
             return [dict(row) for row in rows]
 
@@ -311,17 +361,26 @@ class FileStore:
             rows = db.execute(
                 "SELECT id, root_id, relative_path, name, extension, size_bytes, modified_at, "
                 "created_at, is_directory, mime_guess, excerpt FROM files "
-                "WHERE root_id=? AND is_directory=0 AND (sort_keep_size IS NULL OR sort_keep_size!=size_bytes OR sort_keep_modified IS NOT modified_at) "
+                "WHERE root_id=? AND " + self._not_quarantine_sql() + " AND is_directory=0 AND (sort_keep_size IS NULL OR sort_keep_size!=size_bytes OR sort_keep_modified IS NOT modified_at) "
                 "AND ((SELECT status FROM roots WHERE id=files.root_id)!='truncated' OR scan_pass=(SELECT last_pass FROM scan_state WHERE root_id=files.root_id)) ORDER BY relative_path COLLATE NOCASE",
-                (root_id,),
+                (root_id, *self._not_quarantine_params()),
             ).fetchall()
             return [dict(row) for row in rows]
 
     def get_insights_data(self) -> dict:
         with self._connect() as db:
-            types = db.execute("SELECT extension, COUNT(*) as count, SUM(size_bytes) as total_size FROM files GROUP BY extension ORDER BY count DESC LIMIT 20").fetchall()
-            largest = db.execute("SELECT id, root_id, relative_path, name, extension, size_bytes FROM files ORDER BY size_bytes DESC LIMIT 20").fetchall()
-            newest = db.execute("SELECT id, root_id, relative_path, name, extension, size_bytes, modified_at FROM files ORDER BY modified_at DESC LIMIT 20").fetchall()
+            types = db.execute(
+                "SELECT extension, COUNT(*) as count, SUM(size_bytes) as total_size FROM files WHERE "
+                + self._not_quarantine_sql() + " GROUP BY extension ORDER BY count DESC LIMIT 20",
+                self._not_quarantine_params()).fetchall()
+            largest = db.execute(
+                "SELECT id, root_id, relative_path, name, extension, size_bytes FROM files WHERE "
+                + self._not_quarantine_sql() + " ORDER BY size_bytes DESC LIMIT 20",
+                self._not_quarantine_params()).fetchall()
+            newest = db.execute(
+                "SELECT id, root_id, relative_path, name, extension, size_bytes, modified_at FROM files WHERE "
+                + self._not_quarantine_sql() + " ORDER BY modified_at DESC LIMIT 20",
+                self._not_quarantine_params()).fetchall()
             totals = self.get_stats()
             return {
                 "type_breakdown": [dict(t) for t in types],
@@ -333,7 +392,7 @@ class FileStore:
     @staticmethod
     def _encode_identity(values: dict) -> dict:
         result = dict(values)
-        for key in ("expected_dev", "expected_ino", "post_dev", "post_ino"):
+        for key in ("expected_dev", "expected_ino", "post_dev", "post_ino", "quarantine_dev", "quarantine_ino"):
             value = result.get(key)
             if type(value) is int and not -(2**63) <= value < 2**63:
                 # NTFS identity values can exceed SQLite's signed 64-bit range.
@@ -344,7 +403,7 @@ class FileStore:
     @staticmethod
     def _decode_identity(values: dict) -> dict:
         result = dict(values)
-        for key in ("expected_dev", "expected_ino", "post_dev", "post_ino"):
+        for key in ("expected_dev", "expected_ino", "post_dev", "post_ino", "quarantine_dev", "quarantine_ino"):
             value = result.get(key)
             if isinstance(value, str) and value.startswith("bigint:"):
                 if len(value) > 256:
@@ -383,6 +442,24 @@ class FileStore:
     def get_file_actions(self) -> list[dict]:
         with self._connect() as db:
             rows = db.execute("SELECT * FROM file_actions ORDER BY created_at DESC LIMIT 100").fetchall()
+            return [self._decode_identity(dict(row)) for row in rows]
+
+    def get_quarantine_actions(self, root_id: int | None = None) -> list[dict]:
+        """Return durable quarantine records without reading quarantined content."""
+        query = (
+            "SELECT a.*, r.label AS root_label "
+            "FROM file_actions a JOIN roots r ON r.id=a.root_id "
+            "WHERE a.quarantine_requested=1"
+        )
+        params: list = []
+        if root_id is not None:
+            query += " AND a.root_id=?"
+            params.append(root_id)
+        # Recovery records remain user-resolvable until restored or explicitly
+        # dismissed; do not hide an older unresolved record behind pagination.
+        query += " ORDER BY COALESCE(a.quarantined_at, a.created_at) DESC, a.id DESC"
+        with self._connect() as db:
+            rows = db.execute(query, tuple(params)).fetchall()
             return [self._decode_identity(dict(row)) for row in rows]
 
     def save_sort_plan(self, plan: dict, suggestions: list[dict]) -> None:

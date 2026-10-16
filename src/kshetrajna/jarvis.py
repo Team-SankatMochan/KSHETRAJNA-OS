@@ -25,6 +25,7 @@ from .config import default_data_dir
 from .file_demo import seed_file_demo
 from .file_service import FileService
 from .file_storage import FileStore
+from .instance import InstanceLock
 from .known_folders import discover_known_folders
 
 
@@ -50,6 +51,15 @@ def _cli_positive_id(value: str) -> int:
         return _positive_id(int(value), "ID")
     except ValueError:
         raise argparse.ArgumentTypeError("must be a positive integer in the database ID range") from None
+
+
+def _action_id(value, name: str = "action_id") -> str:
+    if (not isinstance(value, str) or not value or len(value) > 200
+            or not value.isascii()
+            or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+                   for character in value)):
+        raise ValueError(f"Invalid {name}")
+    return value
 
 
 def _loopback_base(url: str) -> str:
@@ -80,6 +90,13 @@ class JarvisCommandBridge:
     _CLEANUP_DUPLICATE_DELETE = frozenset({
         "duplicate_delete", "duplicates_delete", "cleanup_duplicate_delete",
     })
+    _QUARANTINE_LIST = frozenset({
+        "quarantine", "quarantine_list", "quarantine_preview", "quarantine_items",
+        "list_quarantine", "preview_quarantine",
+    })
+    _QUARANTINE_RESTORE = frozenset({
+        "quarantine_restore", "restore_quarantine", "restore_quarantined",
+    })
 
     def __init__(self, file_service: FileService):
         self.file_service = file_service
@@ -96,6 +113,19 @@ class JarvisCommandBridge:
                 raise ValueError(f"{key} must be nonempty text")
         if "size_min" in args:
             raise ValueError("size_min is not supported by the command bridge")
+        if "action_id" in args and command not in cls._QUARANTINE_RESTORE:
+            raise ValueError(f"{command} does not support action_id")
+        if command in cls._QUARANTINE_LIST:
+            unsupported = ("path", "known_folder", "label", "query", "plan_id", "file_id", "action_id")
+            if any(args.get(key) is not None for key in unsupported) or "confirm" in args or "create_folders" in args:
+                raise ValueError(f"{command} supports only an optional root_id")
+        if command in cls._QUARANTINE_RESTORE:
+            unsupported = ("root_id", "path", "known_folder", "label", "query", "plan_id", "file_id")
+            if any(args.get(key) is not None for key in unsupported) or "create_folders" in args:
+                raise ValueError(f"{command} supports only action_id and confirm")
+            _action_id(args.get("action_id"))
+            if args.get("confirm") is not True:
+                raise ValueError(f"{command} requires confirm=true")
         if command in cls._CLEANUP_EMPTY_DELETE | cls._CLEANUP_DUPLICATE_DELETE:
             _positive_id(args.get("file_id"), "file_id")
             if args.get("confirm") is not True:
@@ -177,6 +207,12 @@ class JarvisCommandBridge:
         if command in self._CLEANUP_DUPLICATE_DELETE:
             return self.file_service.delete_duplicate_file(
                 args.get("file_id"), confirm=args.get("confirm", False)
+            )
+        if command in self._QUARANTINE_LIST:
+            return {"items": self.file_service.get_quarantine_items(args.get("root_id"))}
+        if command in self._QUARANTINE_RESTORE:
+            return self.file_service.restore_quarantined_file(
+                args.get("action_id"), confirm=True
             )
         if command == "sort_preview":
             root_id = self._resolve_root(args)
@@ -279,6 +315,12 @@ class JarvisHttpClient:
             return self._get("/api/files/empty" + query)
         return self._get("/api/files/duplicates" + query)
 
+    def _quarantine_list(self, args: dict) -> dict:
+        query = ""
+        if args.get("root_id") is not None:
+            query = "?" + urlencode({"root_id": args["root_id"]})
+        return self._get("/api/files/quarantine" + query)
+
     def execute(self, command: str, **args) -> dict:
         JarvisCommandBridge._validate_args(command, args)
         if command in JarvisCommandBridge._CLEANUP_EMPTY_PREVIEW | JarvisCommandBridge._CLEANUP_DUPLICATE_PREVIEW:
@@ -290,6 +332,12 @@ class JarvisHttpClient:
         if command in JarvisCommandBridge._CLEANUP_DUPLICATE_DELETE:
             return self._post("/api/files/duplicates/delete", {
                 "file_id": args.get("file_id"), "confirm": args.get("confirm", False),
+            })
+        if command in JarvisCommandBridge._QUARANTINE_LIST:
+            return self._quarantine_list(args)
+        if command in JarvisCommandBridge._QUARANTINE_RESTORE:
+            return self._post("/api/files/quarantine/restore", {
+                "action_id": args.get("action_id"), "confirm": True,
             })
         if command == "discover_folders":
             return self._get("/api/files/known-folders")
@@ -347,21 +395,41 @@ def _build_local_bridge(data_dir: Path | None, demo: bool):
     temporary = tempfile.TemporaryDirectory(prefix="kshetrajna-jarvis-") if demo else None
     directory = Path(temporary.name) if temporary else (data_dir or default_data_dir())
     directory.mkdir(parents=True, exist_ok=True)
-    store = FileStore(directory / "files.db")
-    if demo and not store.get_roots():
-        seed_file_demo(store)
-    service = FileService(store, demo=demo)
-    return JarvisCommandBridge(service), temporary
+    try:
+        try:
+            instance = InstanceLock(directory)
+        except RuntimeError:
+            raise ValueError(
+                "Another Kshetrajna instance is using this data directory. "
+                "Use --url with its loopback dashboard URL, or stop the other instance and retry."
+            ) from None
+        store = FileStore(directory / "files.db")
+        if demo and not store.get_roots():
+            seed_file_demo(store)
+        service = FileService(store, demo=demo)
+        bridge = JarvisCommandBridge(service)
+        # Keep the same data-directory lock as the dashboard for the lifetime
+        # of this local bridge. URL mode uses the dashboard's existing lock.
+        bridge._instance_lock = instance
+        return bridge, temporary
+    except BaseException:
+        if "instance" in locals():
+            instance.close()
+        if temporary:
+            temporary.cleanup()
+        raise
 
 
 def main(argv=None, default_command=None) -> int:
     parser = argparse.ArgumentParser(
-        description="Reviewed Sort AI and cleanup commands, locally or through the loopback dashboard.",
+        description="Reviewed Sort AI, cleanup, and recovery commands, locally or through the loopback dashboard.",
         epilog=("Preview first: empty_preview and duplicate_preview only list candidates. "
-                "Cleanup deletion is permanent and requires --file-id ID --confirm. "
+                "Cleanup deletion is reversible quarantine rather than immediate permanent removal and requires --file-id ID --confirm. "
+                "Use quarantine_list (or quarantine_preview) to review recovery records; "
+                "restore requires --action-id ID --confirm. "
                 "A preview with --path or --known-folder approves and scans that folder. "
                 "With kshetrajna-sort (python -m kshetrajna.cli), use cleanup empty|duplicates "
-                "or sort preview|apply|undo; sort options alone default to sort_preview, "
+                "or quarantine list|preview|restore and sort preview|apply|undo; sort options alone default to sort_preview, "
                 "cleanup options alone to empty_preview. Use --jsonl explicitly for JSON-lines input."))
     parser.add_argument("command", nargs="?", default=default_command,
                         choices=(
@@ -370,8 +438,10 @@ def main(argv=None, default_command=None) -> int:
                             *sorted(JarvisCommandBridge._CLEANUP_EMPTY_PREVIEW
                                     | JarvisCommandBridge._CLEANUP_DUPLICATE_PREVIEW
                                     | JarvisCommandBridge._CLEANUP_EMPTY_DELETE
-                                    | JarvisCommandBridge._CLEANUP_DUPLICATE_DELETE),
-                        ))
+                                    | JarvisCommandBridge._CLEANUP_DUPLICATE_DELETE
+                                    | JarvisCommandBridge._QUARANTINE_LIST
+                                    | JarvisCommandBridge._QUARANTINE_RESTORE),
+                         ))
     parser.add_argument("--url", help="Running loopback dashboard URL, for example http://127.0.0.1:8765")
     parser.add_argument("--data-dir", type=Path)
     parser.add_argument("--demo", action="store_true")
@@ -384,8 +454,9 @@ def main(argv=None, default_command=None) -> int:
     parser.add_argument("--query")
     parser.add_argument("--plan-id")
     parser.add_argument("--file-id", type=_cli_positive_id, help="Positive file ID returned by a cleanup preview")
+    parser.add_argument("--action-id", help="Exact quarantine action ID returned by a cleanup result")
     parser.add_argument("--create-folders", action="store_true")
-    parser.add_argument("--confirm", action="store_true", help="Required for apply, undo, and cleanup deletion")
+    parser.add_argument("--confirm", action="store_true", help="Required for apply, undo, cleanup, and quarantine restore")
     args = parser.parse_args(argv)
     if args.url is not None and args.demo:
         parser.error("Choose --url or --demo, not both")
@@ -393,15 +464,18 @@ def main(argv=None, default_command=None) -> int:
         parser.print_help()
         return 0
     temporary = None
+    local_bridge = None
     try:
         payload = {key: value for key, value in vars(args).items()
-                   if key in {"path", "known_folder", "label", "root_id", "query", "plan_id", "file_id", "create_folders", "confirm"} and value is not None}
+                   if key in {"path", "known_folder", "label", "root_id", "query", "plan_id", "file_id", "action_id", "create_folders", "confirm"}
+                   and value is not None and value is not False}
         if not args.jsonl:
             JarvisCommandBridge._validate_args(args.command, payload)
         if args.url is not None:
             bridge = JarvisHttpClient(args.url)
         else:
             bridge, temporary = _build_local_bridge(args.data_dir, args.demo)
+            local_bridge = bridge
         if args.jsonl:
             return serve_jsonl(bridge)
         print(json.dumps({"ok": True, "result": bridge.execute(args.command, **payload), "command": args.command}, indent=2))
@@ -413,6 +487,10 @@ def main(argv=None, default_command=None) -> int:
         print(json.dumps({"ok": False, "error": "Command could not be completed; check the dashboard, paths, and permissions"}))
         return 2
     finally:
+        if local_bridge is not None:
+            instance = getattr(local_bridge, "_instance_lock", None)
+            if instance is not None:
+                instance.close()
         if temporary:
             temporary.cleanup()
 

@@ -4,7 +4,7 @@ const viewCopy = {
   chat: ['THINK OUT LOUD', 'Your assistant', 'Conversation and reviewed PC tools, running on your device.'],
   files: ['KNOW WHAT YOU HAVE', 'File library', 'Scan your chosen locations once. Find files and understand your index.'],
   'sort-ai': ['A HOME FOR EVERYTHING', 'Sort AI', 'Connect scattered files to projects and existing folders.'],
-  cleanup: ['RECLAIM WASTED DISK SPACE', 'Disk Cleanup', 'Find and safely remove 0-byte files and duplicate copies.'],
+  cleanup: ['RECLAIM WASTED DISK SPACE', 'Disk Cleanup', 'Review 0-byte files and duplicate copies with recovery available.'],
   workspaces: ['MAKE ROOM FOR FOCUS', 'Workspaces', 'Your recurring routines and saved application boards.'],
   maintenance: ['A LITTLE HOUSEKEEPING', 'System tools', 'Inspect each action, its scope and its undo limitations.'],
   history: ['EVERY CHANGE, ACCOUNTED FOR', 'History & undo', 'Inspect decisions and restore eligible changes.'],

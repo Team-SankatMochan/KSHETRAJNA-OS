@@ -255,7 +255,7 @@ class SubmissionTests(unittest.TestCase):
         self.assertEqual(status, 200)
         report = json.loads(body)
         self.assertEqual(report["mode"], "demo")
-        self.assertEqual(report["version"], "0.3.0")
+        self.assertEqual(report["version"], "0.5.0")
 
 
 if __name__ == "__main__":

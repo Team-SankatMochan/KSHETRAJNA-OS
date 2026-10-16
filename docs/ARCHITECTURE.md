@@ -88,7 +88,7 @@ The first four actions delegate to Windows interfaces and do not report completi
 - **Bounded Extraction:** Only listed plain-text file extensions have their contents extracted, strictly bounded to 4KB, sanitized of control characters. The bounded preview powers deterministic content profiles and cautious review signals such as empty, placeholder, draft, stale-log, or generated-artifact warnings. Known sensitive filenames (`.env`, `id_rsa`) are cataloged but their contents are never extracted.
 - **One-click Review:** A review candidate opens a bounded source/text preview in the dashboard with line numbers for code/configuration. DOCX/PPTX/XLSX previews extract text from safe Office XML parts without executing macros or rendering media. Approved PDFs are streamed into an in-dashboard sandboxed document viewer and also receive bounded text extraction. Approved PNG/JPEG/GIF/WebP/BMP images are streamed into an in-dashboard fit/actual-size viewer after signature, dimension, size, identity, and path checks; no external app is launched. Raster pixels are displayed but are not claimed to have semantic vision recognition.
 - **Independence:** Removing File Intelligence data (`files.db`) does not interact with or compromise the System Intelligence recovery journal (`events.db`).
-- **Cleanup contract:** Cleanup previews operate only on ready or truncated approved roots. Zero-byte candidates are checked against the live filesystem before display and deletion. Duplicate groups first match live file sizes, then verify full SHA-256 content for eligible regular files (bounded to 100 MiB per file); links, reparse points, protected project/structural names, sensitive files, unavailable roots, and stale catalog rows are excluded. A delete requires `confirm: true`, journals identity/content evidence before mutation, revalidates that a duplicate peer survives, and removes the catalog row only after the physical deletion succeeds. Cleanup does not claim an undo path.
+- **Cleanup contract:** Cleanup previews operate only on ready or truncated approved roots. Zero-byte candidates are checked against the live filesystem before display and reviewed cleanup moves them into the protected `.kshetrajna-quarantine` directory rather than deleting them. Duplicate groups first match live file sizes, then verify full SHA-256 content for eligible regular files (bounded to 100 MiB per file); links, reparse points, protected project/structural names, sensitive files, unavailable roots, and stale catalog rows are excluded. A cleanup action requires `confirm: true`, journals identity/content evidence before mutation, revalidates that a duplicate peer survives, and removes the catalog row only after the quarantine move succeeds. List and restore operations keep the recovery record durable; the legacy generic file-action `DELETE` endpoint remains the separate permanent, non-undoable compatibility path.
 
 ## Sort AI action contract
 
@@ -116,14 +116,15 @@ proposal first, then applies it with size/time/identity checks. Outcomes can be
 applied, partial, failed, or undone; approving one idea leaves other ideas
 pending. Undo runs in reverse order and never overwrites a path that became
 occupied or changed. A directory created by a plan is removed only if it is
-still empty; cleanup is best effort and never recursive deletion. A reviewed
-file can also receive a separate, explicitly confirmed permanent-delete action;
-delete actions are journaled but are not undoable by Kshetrajna.
+still empty; cleanup is best effort and never recursive deletion. A file can
+also receive the separate, explicitly confirmed generic file-action
+permanent-delete action; that compatibility path is journaled but is not
+undoable by Kshetrajna. Reviewed empty/duplicate cleanup uses quarantine instead.
 
 The plan and suggestion tables are in `files.db`. Startup reconciliation links
 an action that completed just before a crash back to its plan. Deleting the
-file catalog is refused while proposed, prepared, applied, or failed-undo
-records still need recovery.
+file catalog is refused while proposed, prepared, applied, failed-undo, or
+unresolved quarantine records still need recovery.
 
 ## Outcome interpretation
 

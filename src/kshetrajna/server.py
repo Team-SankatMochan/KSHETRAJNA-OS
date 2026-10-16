@@ -81,6 +81,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
             raise ValueError(f"Invalid {name}")
         return value
 
+    @staticmethod
+    def _body_action_id(body: dict) -> str:
+        value = body.get("action_id")
+        if (not isinstance(value, str) or not value or len(value) > 200
+                or not value.isascii()
+                or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for character in value)):
+            raise ValueError("Invalid action_id")
+        return value
+
     def do_GET(self) -> None:
         if not self._allowed_host():
             self._json(403, {"error": "Host rejected"})
@@ -181,6 +190,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._json(400, {"error": str(e)})
         elif path == "/api/files/actions" and self.server.file_service:
             self._json(200, {"actions": self.server.file_service.get_action_journal()})
+        elif path == "/api/files/quarantine" and self.server.file_service:
+            from urllib.parse import parse_qs
+            try:
+                qs = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+                root_id = (self._parse_file_id(qs["root_id"][0], "root_id")
+                           if "root_id" in qs else None)
+                self._json(200, {"items": self.server.file_service.get_quarantine_items(root_id)})
+            except ValueError as e:
+                self._json(400, {"error": str(e)})
         elif path == "/api/files/empty" and self.server.file_service:
             from urllib.parse import parse_qs
             try:
@@ -393,6 +411,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 result = self.server.file_service.delete_duplicate_file(
                     self._body_file_id(body, "file_id"), confirm=body.get("confirm"))
                 self._json(200 if result.get("deleted") else 409, result)
+            elif path == "/api/files/quarantine/restore" and self.server.file_service:
+                result = self.server.file_service.restore_quarantined_file(
+                    self._body_action_id(body), confirm=body.get("confirm"))
+                self._json(200 if result.get("status") == "restored" else 409, result)
             else:
                 self._json(404, {"error": "Not found"})
         except (ValueError, TypeError) as error:

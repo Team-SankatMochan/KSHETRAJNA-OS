@@ -13,7 +13,7 @@ See [the quick start](WINDOWS_QUICKSTART.md) and [package details](WINDOWS_BUNDL
 
 ## Source launch
 
-Prerequisite: Python 3.13 on Windows. The project has no third-party runtime
+Prerequisite: CPython 3.13.16 on Windows. The project has no third-party runtime
 packages. From the repository directory:
 
 ```powershell
@@ -51,6 +51,14 @@ python -m kshetrajna.jarvis --url http://127.0.0.1:8765 discover_folders
 python -m kshetrajna.jarvis --url http://127.0.0.1:8765 sort_preview --known-folder downloads --create-folders
 python -m kshetrajna.jarvis --url http://127.0.0.1:8765 sort_apply --plan-id PLAN_ID --confirm
 python -m kshetrajna.jarvis --url http://127.0.0.1:8765 sort_undo --plan-id PLAN_ID --confirm
+
+# Preview, quarantine the reviewed file, list the recovery record, then restore it
+python -m kshetrajna.cli cleanup empty --url http://127.0.0.1:8765 --root-id 3
+python -m kshetrajna.cli cleanup_empty_delete --url http://127.0.0.1:8765 `
+  --file-id FILE_ID --confirm
+python -m kshetrajna.cli quarantine list --url http://127.0.0.1:8765 --root-id 3
+python -m kshetrajna.cli quarantine restore --url http://127.0.0.1:8765 `
+  --action-id ACTION_ID --confirm
 ```
 
 `kshetrajna-sort` is installed as a convenience entry point. Bare invocation
@@ -61,11 +69,15 @@ The bridge discovers the dashboard token from the local page, validates that
 the target is loopback, and never exposes arbitrary commands. Creating a
 preview stores a plan; specifying a new folder also approves indexing it.
 Original files are changed only by explicitly confirmed apply, undo, or cleanup
-deletion commands. Cleanup deletion is permanent; see [reviewed cleanup](CLEANUP.md).
+quarantine/restore commands. A successful live cleanup returns
+`deleted:true`, `quarantined:true`, and an `action_id`; it is not a permanent
+final purge. The current bridge exposes no final-purge command. The legacy
+generic file-action DELETE endpoint remains a separate permanent-delete API.
+See [reviewed cleanup](CLEANUP.md).
 
 ## Snapdragon X / Windows ARM64
 
-1. Install the official native ARM64 Python 3.13 distribution where available.
+1. Install the official native ARM64 Python 3.13.16 distribution where available.
 2. Open the repository in a normal user PowerShell.
 3. Run `check_device.cmd --require-native-arm64`.
 4. Review `reports\device-check.json` before making native performance or
@@ -81,16 +93,18 @@ checkout.
 ## Packaging status
 
 Public version 0.4.3 contains self-contained x64 and ARM64 archives with the
-official hash-pinned CPython 3.13.16 runtime. Both exact archives passed native
-packaged-app checks, and the 162-test source suite passed Windows x64, Windows
-ARM64 and Linux. Installation is scoped to the current user's profile and keeps
-history separately. The archives and setup scripts are unsigned; no signed
-MSI/EXE installer or automatic-update service is included.
+official hash-pinned CPython 3.13.16 runtime. Those release artifacts and their
+historical package checks are recorded in [the validation history](VALIDATION.md);
+they do not qualify the later quarantine changes. Current source qualification
+is Linux-only. Native Windows package/device checks, Docker build/run, and a
+new release are not claimed here. The archives and setup scripts are unsigned;
+no signed MSI/EXE installer or automatic-update service is included.
 
 ## Uninstall and data removal
 
 Stop the process, remove the repository or launcher shortcut, and use the
 dashboard deletion controls for stored data. Removing the application does not
-automatically delete `%LOCALAPPDATA%\Kshetrajna`; review and delete that folder
-only after unresolved recovery records are handled. Original approved-folder
-files are never removed by catalog deletion.
+automatically delete `%LOCALAPPDATA%\Kshetrajna`; restore or otherwise resolve
+quarantine records first. Unresolved file-action records block catalog and
+approved-root deletion. There is no final-purge API in this milestone, and
+catalog deletion never removes original approved-folder files.

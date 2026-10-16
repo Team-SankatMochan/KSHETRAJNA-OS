@@ -1,4 +1,4 @@
-"""Convenience entry point for reviewed Sort AI and cleanup commands."""
+"""Convenience entry point for reviewed Sort AI, cleanup, and recovery commands."""
 
 import sys
 
@@ -19,6 +19,13 @@ def main() -> int:
             arguments[0] = "empty_preview"
         elif arguments and arguments[0] in {"duplicate", "duplicates"}:
             arguments[0] = "duplicate_preview"
+    elif arguments and arguments[0] == "quarantine":
+        arguments = arguments[1:]
+        default_command = "quarantine_list"
+        if arguments and arguments[0] in {"list", "preview", "items"}:
+            arguments[0] = "quarantine_list"
+        elif arguments and arguments[0] == "restore":
+            arguments[0] = "quarantine_restore"
     if arguments and arguments[0].startswith("-"):
         return bridge_main(arguments, default_command=default_command)
     return bridge_main(arguments)

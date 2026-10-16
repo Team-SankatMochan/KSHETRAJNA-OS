@@ -139,7 +139,7 @@ To remove: Quit and remove the extracted or installed version folder and its sho
 History and original user files are preserved; use Privacy to delete stored history.
 
 Source: https://github.com/Team-SankatMochan/KSHETRAJNA-OS
-Setup: https://github.com/Team-SankatMochan/KSHETRAJNA-OS/blob/experimental/sort-ai-jarvis/docs/WINDOWS_QUICKSTART.md
+Setup: https://github.com/Team-SankatMochan/KSHETRAJNA-OS/blob/main/docs/WINDOWS_QUICKSTART.md
 """)
         inventory = {member.relative_to(package).as_posix(): sha256(member)
                      for member in sorted(package.rglob("*")) if member.is_file()}
