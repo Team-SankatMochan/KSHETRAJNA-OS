@@ -5,16 +5,25 @@ Ollama model. It requires no paid API key, cloud account, or automatic model
 download. It is not OpenAI ChatGPT, and response quality/speed depend on the
 selected model and hardware.
 
+This is the optional Local Assistant component of the **0.5.0 baseline**, not a
+requirement for core PC-health/file-intelligence tools. Source at `25a0de7` has
+the **Local Assistant** destination and Basic/Expert navigation. Local AI is not
+a second mutation authority: chat uses existing local domain review/execute
+routes with literal service confirmation and permission-generation checks.
+The narrow canonical ledger/API is also implemented, but chat is not silently
+migrated to it and `canonical_authority_complete` remains false. See
+[action coverage](ACTIONS.md) and [remaining final gates](FINAL_RELEASE.md).
+
 ## Start
 
-1. Start Ollama on this computer. This development machine already has
-   `llama3.1:8b` installed. Other devices need their own compatible runtime and
-   model. Install from https://ollama.com/download if needed; choosing and
+1. Start Ollama on this computer with a compatible local model installed by you.
+   No particular model is required or provided. Install from
+   https://ollama.com/download if needed; choosing and
    downloading a model remains a user action.
 2. Start Ollama separately and open **Launch.cmd** from a Windows bundle.
    For a source checkout, `run_chat.cmd` can start an already installed Ollama
    runtime; `run.cmd` also works when Ollama is already running.
-3. Open **Chat**, choose an installed model, and enable local AI after reviewing
+3. Open **Local Assistant**, choose an installed model, and enable local AI after reviewing
    its consent message. Model selection and the opt-in are saved locally.
 4. Enable live collection to inspect this PC. Demo readings and actions remain
    synthetic even when the conversation uses a real model.
@@ -57,12 +66,20 @@ At most one review request and one follow-up response are performed per turn.
 User text,
 process names, and model output never serve as action approval. Review and
 execute are separate token-protected endpoints.
+Service execution requires literal `confirm:true`; permission disable/re-enable
+invalidates earlier maintenance/process reviews. Basic hides memory trim and
+force termination; Expert reveals them without enabling maintenance/app controls.
+Neither view changes permission, and both keep necessary recovery accessible.
 
 Memory review offers eligible one-process working-set trims and Windows storage
-tools. Available physical memory comes from fresh telemetry. Trimming resident
-pages can cause page faults and slow an app, and is not a system-wide cache
-flush, permanent RAM saving, or proven speedup. An **Unload model** control asks
-Ollama to release the selected model's allocation; the next reply reloads it.
+tools. Available physical memory comes from fresh telemetry. Standby pages are
+already reusable, and cache figures overlap other counters; do not add them to
+available RAM or call them waste. Trimming resident pages can cause refaults and
+latency, does not release committed allocations, and is not a system-wide cache
+flush, permanent RAM saving, or proven speedup. There is no unsupported standby
+purge, blanket RAM cleaner or registry cleaner. An **Unload model** control asks
+Ollama to release the selected model's allocation; an acknowledgement is not
+measured reclaimed bytes, and the next reply reloads it.
 Inference uses a one-minute keep-alive timeout to avoid retaining that model
 indefinitely. In-progress inference must finish or be stopped before unloading.
 
@@ -93,6 +110,15 @@ Temporary cleanup, Store cache and Disk Cleanup keep their existing individual
 previews, opt-ins and irreversible-operation disclosures. Organizing files
 opens the reviewed Sort AI panel; chat does not silently scan folders.
 
+File cleanup quarantine retains bytes, normally on the same volume, and is not
+capacity recovered. A Storage/Disk Cleanup launch is not verified completion.
+Before/after readings are observations, not causal proof: concurrent workload,
+collection gaps, delayed effects and unavailable counters must remain visible.
+System Health and Investigate Memory now expose the separate physical/commit/
+cache/OS low-memory model and system-volume disk readings, with nullable fields
+and freshness. Unified delayed action measurement/presentation remains pending;
+do not infer it from chat replies or a current health reading.
+
 ## Local model boundary
 
 Only `127.0.0.1:11434` is contacted by the provider. Installed models must pass
@@ -101,8 +127,9 @@ providers are rejected. No proxy, arbitrary host, API key, model pull, or shell
 execution API is exposed.
 
 After local AI consent, the prompt includes the conversation and an available
-fresh telemetry summary. No document excerpts, file contents or directory
-listings are sent to the model. Collection pause prevents retained telemetry
+fresh telemetry summary. The application does not automatically attach document
+excerpts, file contents, paths or directory listings. Anything the user types or
+pastes into chat is nevertheless sent as conversation content. Collection pause prevents retained telemetry
 from being included as a new PC summary. Previous chat messages remain in the
 conversation until cleared. Ollama is a separate process on the same
 computer and may have its own logs/configuration. Kshetrajna chat clearing does
@@ -111,21 +138,35 @@ not claim to erase memory or logs owned by that runtime.
 ## Snapdragon / ARM64
 
 The Python client and process bindings use the project's standard-library and
-pointer-sized Windows declarations. The source suite and packaged application
-passed native Windows x64 and ARM64 CI. Local model replies were checked on x64.
-The external Ollama runtime is a separate compatibility requirement: its
-official Windows documentation currently describes AMD64 distribution. Verify
-the runtime available on the Snapdragon device, or its emulation behavior,
+pointer-sized Windows declarations. **Historical 0.4.3** source and packages had
+native x64/ARM64 CI checks; they do not qualify current 0.5.0 or final changes.
+The coordinator reports 453 combined pinned-Linux tests (450 passed, three
+skipped); last native evidence is still the 276-test x64 CPython 3.13.3 baseline,
+not a new native or pinned-patch ARM64 package qualification. A historical
+local-model reply was checked on x64, not Snapdragon. The external Ollama runtime
+is a separate compatibility requirement. Verify its current architecture support,
+the runtime available on the Snapdragon device, and any emulation behavior,
 before claiming native ARM64 inference. No Qualcomm NPU acceleration is claimed.
 
 ## Verification
 
-The integration suite covers local-AI consent, retained-history privacy,
+The existing integration tests cover local-AI consent, retained-history privacy,
 conversation history, clearing/cancellation, provider errors, cloud rejection,
 HTTP session guards, process allowlists, foreground/identity/expiry checks,
 force confirmation and journal-before-mutation ordering. Native user SID
 bindings were also checked read-only on Windows. Tests use fixtures and driver
 doubles; no personal app was closed or terminated during validation.
+
+Those are [recorded/coordinator-reported checks](VALIDATION.md), not new tests
+run by this documentation change. Strict service confirmation and the narrow
+canonical expiry/replay/revocation/review flow exist; complete canonical adapter
+coverage does not. Remaining qualification includes real browser/keyboard/NVDA
+review and cancellation, comprehensive diagnostic redaction, exact pinned-runtime
+native packages and real hardware/users. Metadata-only indexing/separate content
+consent and delayed outcomes also remain pending. Expert changes visibility
+only, not maintenance/app-control/local-AI permission. Signing access, Snapdragon
+measurements and human participants are blockers until available, not passes. See
+[privacy](PRIVACY.md) and [crash-reporting limits](CRASH_REPORTING.md).
 
 References: [Ollama chat API](https://docs.ollama.com/api/chat),
 [Ollama on Windows](https://docs.ollama.com/windows),

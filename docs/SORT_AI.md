@@ -1,8 +1,23 @@
-# Sort AI 0.4.3
+# Sort AI and reviewed file organization
+
+Sort AI is the implemented deterministic organization component of the **0.5.0
+baseline**, in the **Organize Files** destination. Basic/Expert navigation and a
+narrow canonical action ledger exist at `25a0de7`, but Sort AI remains
+domain-authoritative: file kinds are deferred in v1 and
+`canonical_authority_complete` is false. See [action coverage](ACTIONS.md) and
+[remaining final work](FINAL_RELEASE.md), not a claim that 1.0.0 is ready.
+Historical 0.4.3 bundles include an earlier organizer/watcher, not current
+quarantine or final privacy/consent changes.
+
+**Current privacy boundary:** approving a scan permits persistence of metadata
+and allowed text/Office/PDF excerpts in `files.db`; metadata-only indexing and
+separate content consent are not the current default. Text/Office output is
+bounded to 4,096 UTF-8 bytes; PDF output to 4,096 characters, not guaranteed
+4 KiB. See [privacy and retention](PRIVACY.md).
 
 ## Use it
 
-1. In File Intelligence, find Downloads, Desktop, or another known folder and
+1. In **Organize Files**, find Downloads, Desktop, or another known folder and
    choose **Approve and scan**. Paths come from Windows' known-folder API,
    including redirected locations. OneDrive environment locations are also
    discovered.
@@ -10,7 +25,9 @@
    together**, select the personal/data folders you want, and approve once.
    File Intelligence never silently scans the whole machine: each location is
    shown before indexing, and system/app-data folders, credentials, links, and
-   cloud-only entries remain excluded.
+   cloud-only entries remain excluded from traversal/inspection as applicable.
+   Sensitive-file metadata may still be cataloged without an excerpt; exclusion
+   lists are not a guarantee that every secret is recognized.
 3. Watch the scan status and indexed count. Errors, skipped entries, and
    partial scans are shown beside each folder. Choose one ready folder in Sort
    AI, or choose **All approved locations** to compare the selected sources and
@@ -87,6 +104,29 @@ folders and generated dependencies remain protected.
 File moves retain path, identity, overwrite and journal checks. Rescans are
 queued without discarding a new request during worker shutdown. UI refreshes
 do not replace an active plan or collapse unchanged review details.
+
+## Integration and final gates
+
+Use the running loopback service for CLI/assistant integration, with roots
+approved in the UI and selected by ID. New roots selected with `--path` or
+`--known-folder` require explicit `--consent` (JSONL: `"consent":true`); preview
+arguments alone cannot approve them. Approval still includes excerpt scanning.
+Sort apply/idea/batch/keep/organize and undo now require literal `confirm:true`
+in the service, not only the bridge. Domain plans, exact selections,
+destinations, expiry, identity and no-overwrite checks remain authoritative;
+canonical file adapters are still pending. Expert view never grants root access
+or approves moves; necessary recovery is available in both modes.
+
+The optional local model cannot authorize scanning or sorting, and filenames,
+excerpts and model replies are untrusted input. No arbitrary shell execution,
+remote provider, model download or NPU dependency is introduced by Sort AI.
+Cleanup remains [a separate quarantine flow](CLEANUP.md): retained bytes are not
+capacity recovered, and sorting does not purge anything.
+
+Current fixture coverage and historical browser/package checks are recorded in
+[validation](VALIDATION.md); they do not complete Windows reparse-race, exact
+candidate x64/ARM64 package, final privacy, accessible UI, hardware/performance or
+human-user qualification. See [final gates](FINAL_RELEASE.md).
 
 ## Windows API references
 
