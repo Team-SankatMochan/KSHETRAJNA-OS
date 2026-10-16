@@ -3,6 +3,7 @@
 from collections import Counter, defaultdict
 from datetime import datetime
 from hashlib import sha256
+from .health import summarize_health
 from .patterns import learn_patterns
 
 
@@ -26,7 +27,8 @@ def analyze(observations: list[dict], latest: dict | None, events: list[dict],
     if not latest:
         return {"context": "Waiting for consent", "confidence": 0, "explanation": "Enable collection or launch the demo.",
                 "rankings": [], "workflows": [], "prediction": None, "sample_count": 0, "active_minutes": 0,
-                "switches": 0, "pressure": "Unknown", **learn_patterns([], None, idle_threshold)}
+                "switches": 0, "pressure": "Unknown", "health": summarize_health(None),
+                **learn_patterns([], None, idle_threshold)}
     recent = observations[-24:]
     votes = Counter()
     for index, row in enumerate(recent):
@@ -77,7 +79,7 @@ def analyze(observations: list[dict], latest: dict | None, events: list[dict],
     return {"context": context, "confidence": confidence, "explanation": explanation,
             "rankings": rankings, **patterns,
             "sample_count": len(observations), "active_minutes": round(active_seconds / 60, 1),
-            "pressure": pressure}
+            "pressure": pressure, "health": summarize_health(latest)}
 
 
 def recommend(latest: dict | None, model: dict) -> list[dict]:

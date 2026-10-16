@@ -37,7 +37,12 @@ class DemoProbe:
         return Snapshot((at or datetime.now(timezone.utc)).isoformat(), cpu, 16 * 1024**3,
                         int(2.1 * 1024**3), 90001 + active if track_foreground else None,
                         apps[active] if track_foreground else None, 2.0 if track_foreground else None,
-                        processes[:max_processes] if track_processes else [])
+                        processes[:max_processes] if track_processes else [],
+                        memory_commit_total_bytes=18 * 1024**3,
+                        memory_commit_limit_bytes=32 * 1024**3,
+                        memory_system_cache_bytes=3 * 1024**3,
+                        memory_low_signal=False,
+                        disk_total_bytes=512 * 1024**3, disk_free_bytes=120 * 1024**3)
 
 
 def seed_demo(store, probe):

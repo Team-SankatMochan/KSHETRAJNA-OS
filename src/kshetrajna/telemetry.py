@@ -5,6 +5,7 @@ import ntpath
 import sys
 from ctypes import wintypes
 from datetime import datetime, timezone
+from weakref import finalize
 
 from .models import ProcessSample, Snapshot
 
@@ -46,6 +47,26 @@ class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
     ]
 
 
+class PERFORMANCE_INFORMATION(ctypes.Structure):
+    # Win32 DWORD is always 32 bits, including when inspecting fixtures on Linux.
+    _fields_ = [
+        ("cb", ctypes.c_uint32),
+        ("commit_total", ctypes.c_size_t),
+        ("commit_limit", ctypes.c_size_t),
+        ("commit_peak", ctypes.c_size_t),
+        ("physical_total", ctypes.c_size_t),
+        ("physical_available", ctypes.c_size_t),
+        ("system_cache", ctypes.c_size_t),
+        ("kernel_total", ctypes.c_size_t),
+        ("kernel_paged", ctypes.c_size_t),
+        ("kernel_nonpaged", ctypes.c_size_t),
+        ("page_size", ctypes.c_size_t),
+        ("handle_count", ctypes.c_uint32),
+        ("process_count", ctypes.c_uint32),
+        ("thread_count", ctypes.c_uint32),
+    ]
+
+
 class LASTINPUTINFO(ctypes.Structure):
     _fields_ = [("cb_size", wintypes.UINT), ("time", wintypes.DWORD)]
 
@@ -55,6 +76,13 @@ def _bind(dll, name, result, args):
     function.restype = result
     function.argtypes = args
     return function
+
+
+def _optional_bind(dll, name, result, args):
+    try:
+        return _bind(dll, name, result, args)
+    except (AttributeError, OSError):
+        return None
 
 
 class WindowsProbe:
@@ -87,12 +115,97 @@ class WindowsProbe:
                                     [wintypes.HWND, ptr(wintypes.DWORD)])
         self.last_input = _bind(user, "GetLastInputInfo", wintypes.BOOL, [ptr(LASTINPUTINFO)])
         self.tick_count = _bind(kernel, "GetTickCount64", ctypes.c_ulonglong, [])
+        self.performance_info = _optional_bind(psapi, "GetPerformanceInfo", wintypes.BOOL,
+                                               [ptr(PERFORMANCE_INFORMATION), wintypes.DWORD])
+        self.create_memory_notification = _optional_bind(
+            kernel, "CreateMemoryResourceNotification", wintypes.HANDLE, [ctypes.c_int])
+        self.query_memory_notification = _optional_bind(
+            kernel, "QueryMemoryResourceNotification", wintypes.BOOL,
+            [wintypes.HANDLE, ptr(wintypes.BOOL)])
+        self.windows_directory = _optional_bind(kernel, "GetWindowsDirectoryW", wintypes.UINT,
+                                                [wintypes.LPWSTR, wintypes.UINT])
+        self.drive_type = _optional_bind(kernel, "GetDriveTypeW", wintypes.UINT, [wintypes.LPCWSTR])
+        self.disk_space = _optional_bind(kernel, "GetDiskFreeSpaceExW", wintypes.BOOL,
+                                         [wintypes.LPCWSTR, ptr(ctypes.c_ulonglong),
+                                          ptr(ctypes.c_ulonglong), ptr(ctypes.c_ulonglong)])
         self._previous_system: tuple[int, int] | None = None
         self._previous_processes: dict[int, tuple[int, int]] = {}
+        self._notification_handle = None
+        self._notification_finalizer = None
+        self._notification_attempted = False
+
+    def close(self) -> None:
+        """Release the optional notification; reset allows lazy reuse afterwards."""
+        cleanup = self._notification_finalizer
+        self._notification_handle = None
+        self._notification_finalizer = None
+        if cleanup is not None:
+            cleanup()
 
     def reset(self) -> None:
+        self.close()
+        self._notification_attempted = False
         self._previous_system = None
         self._previous_processes.clear()
+
+    def _performance_memory(self) -> tuple[int | None, int | None, int | None]:
+        if self.performance_info is None:
+            return None, None, None
+        info = PERFORMANCE_INFORMATION()
+        info.cb = ctypes.sizeof(info)
+        try:
+            if not self.performance_info(ctypes.byref(info), info.cb) or not info.page_size:
+                return None, None, None
+        except OSError:
+            return None, None, None
+        # These counters are pages, not bytes. Cache overlaps available physical RAM.
+        committed = int(info.commit_total) * int(info.page_size) if info.commit_limit else None
+        limit = int(info.commit_limit) * int(info.page_size) if info.commit_limit else None
+        return committed, limit, int(info.system_cache) * int(info.page_size)
+
+    def _low_memory_signal(self) -> bool | None:
+        if self.create_memory_notification is None or self.query_memory_notification is None:
+            return None
+        try:
+            if not self._notification_attempted:
+                self._notification_attempted = True
+                handle = self.create_memory_notification(0)  # LowMemoryResourceNotification
+                if handle:
+                    self._notification_handle = handle
+                    self._notification_finalizer = finalize(self, self.close_handle, handle)
+            if self._notification_handle is None:
+                return None
+            state = wintypes.BOOL()
+            if self.query_memory_notification(self._notification_handle, ctypes.byref(state)):
+                return bool(state.value)
+        except OSError:
+            pass
+        return None
+
+    def _disk_capacity(self) -> tuple[int | None, int | None]:
+        """Caller-visible capacity on the fixed Windows volume only; never enumerate."""
+        if self.windows_directory is None or self.drive_type is None or self.disk_space is None:
+            return None, None
+        try:
+            directory = ctypes.create_unicode_buffer(260)
+            length = self.windows_directory(directory, len(directory))
+            if not 0 < length < len(directory):
+                return None, None
+            drive, tail = ntpath.splitdrive(directory.value)
+            if (len(drive) != 2 or drive[0] not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+                    or drive[1] != ":" or not tail.startswith("\\")):
+                return None, None
+            root = drive + "\\"
+            if self.drive_type(root) != 3:  # DRIVE_FIXED; exclude remote/removable volumes.
+                return None, None
+            free, total = ctypes.c_ulonglong(), ctypes.c_ulonglong()
+            if not self.disk_space(root, ctypes.byref(free), ctypes.byref(total), None):
+                return None, None
+            if not total.value or free.value > total.value:
+                return None, None
+            return int(total.value), int(free.value)
+        except OSError:
+            return None, None
 
     def _system(self) -> tuple[int, int, int, int]:
         idle, kernel, user = FILETIME(), FILETIME(), FILETIME()
@@ -161,6 +274,9 @@ class WindowsProbe:
         idle_delta = idle - previous[0] if previous else 0
         cpu = max(0.0, min(100.0, 100 * (1 - idle_delta / total_delta))) if total_delta > 0 else 0.0
         self._previous_system = (idle, total)
+        commit_total, commit_limit, system_cache = self._performance_memory()
+        low_memory = self._low_memory_signal()
+        disk_total, disk_free = self._disk_capacity()
 
         foreground_pid = self._foreground() if track_foreground else None
         idle_seconds = self._idle_seconds() if track_foreground else None
@@ -198,4 +314,10 @@ class WindowsProbe:
             foreground_app=foreground_app,
             idle_seconds=idle_seconds,
             processes=selected,
+            memory_commit_total_bytes=commit_total,
+            memory_commit_limit_bytes=commit_limit,
+            memory_system_cache_bytes=system_cache,
+            memory_low_signal=low_memory,
+            disk_total_bytes=disk_total,
+            disk_free_bytes=disk_free,
         )

@@ -17,8 +17,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .patterns import learn_patterns
+from .health import summarize_health
 from .telemetry import (FILETIME, LASTINPUTINFO, MEMORYSTATUSEX,
-                        PROCESS_MEMORY_COUNTERS, WindowsProbe, _bind)
+                        PERFORMANCE_INFORMATION, PROCESS_MEMORY_COUNTERS, WindowsProbe, _bind)
 
 
 def architecture():
@@ -45,10 +46,18 @@ def abi_checks():
     if sys.platform != "win32":
         return {"status": "not_applicable", "reason": "Win32 ABI checks require Windows."}
     expected = {"FILETIME": 8, "LASTINPUTINFO": 8, "MEMORYSTATUSEX": 64,
-                "PROCESS_MEMORY_COUNTERS": 72 if ctypes.sizeof(ctypes.c_void_p) == 8 else 40}
+                "PROCESS_MEMORY_COUNTERS": 72 if ctypes.sizeof(ctypes.c_void_p) == 8 else 40,
+                "PERFORMANCE_INFORMATION": 104 if ctypes.sizeof(ctypes.c_void_p) == 8 else 56}
     actual = {kind.__name__: ctypes.sizeof(kind) for kind in
-              (FILETIME, LASTINPUTINFO, MEMORYSTATUSEX, PROCESS_MEMORY_COUNTERS)}
-    return {"status": "passed" if actual == expected else "failed", "expected": expected, "actual": actual}
+              (FILETIME, LASTINPUTINFO, MEMORYSTATUSEX, PROCESS_MEMORY_COUNTERS, PERFORMANCE_INFORMATION)}
+    offsets = ([0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 92, 96]
+               if ctypes.sizeof(ctypes.c_void_p) == 8 else list(range(0, 56, 4)))
+    expected_offsets = {name: offset for (name, _), offset in zip(PERFORMANCE_INFORMATION._fields_, offsets)}
+    actual_offsets = {name: getattr(PERFORMANCE_INFORMATION, name).offset
+                      for name, _ in PERFORMANCE_INFORMATION._fields_}
+    return {"status": "passed" if actual == expected and actual_offsets == expected_offsets else "failed",
+            "expected": expected, "actual": actual,
+            "expected_offsets": expected_offsets, "actual_offsets": actual_offsets}
 
 
 def summary(values):
@@ -76,36 +85,43 @@ def pattern_benchmark(repeats=5):
 
 def live_check(samples=6):
     """Read Windows counters without changing settings or writing telemetry history."""
-    probe = WindowsProbe()
-    probe.sample(track_processes=True, track_foreground=True, max_processes=12)
-    timings, process_counts, memory, foreground = [], [], [], 0
-    cpu_began, wall_began = time.process_time(), time.perf_counter()
-    for _ in range(samples):
-        time.sleep(1)
-        began = time.perf_counter()
-        sample = probe.sample(track_processes=True, track_foreground=True, max_processes=12)
-        timings.append((time.perf_counter() - began) * 1000)
-        if not (0 <= sample.cpu_percent <= 100 and
-                0 < sample.memory_total_bytes and
-                0 <= sample.memory_available_bytes <= sample.memory_total_bytes):
-            raise ValueError("Windows returned invalid aggregate CPU or memory counters")
-        process_counts.append(len(sample.processes))
-        foreground += sample.foreground_app is not None
-        own = probe._process(os.getpid())
-        if own:
-            memory.append(own[1] / 1024**2)
-    elapsed = time.perf_counter() - wall_began
-    cpu_seconds = time.process_time() - cpu_began
-    return {"status": "passed" if max(process_counts) else "partial",
-            "samples": samples, "collection": summary(timings),
-            "observed_process_count_min": min(process_counts),
-            "observed_process_count_max": max(process_counts),
-            "foreground_available_samples": foreground,
-            "diagnostic_process_peak_sampled_working_set_mb": round(max(memory), 2) if memory else None,
-            "diagnostic_process_cpu_seconds": round(cpu_seconds, 4),
-            "wall_seconds": round(elapsed, 3),
-            "single_core_cpu_percent": round(100 * cpu_seconds / elapsed, 3),
-            "note": "One-second diagnostic sampling; not dashboard overhead, battery life or optimization benefit. Foreground may be unavailable on CI/locked desktops."}
+    with closing(WindowsProbe()) as probe:
+        probe.sample(track_processes=True, track_foreground=True, max_processes=12)
+        timings, process_counts, memory, foreground = [], [], [], 0
+        optional_counts = dict.fromkeys(("memory_commit_total_bytes", "memory_commit_limit_bytes",
+                                         "memory_system_cache_bytes", "memory_low_signal",
+                                         "disk_total_bytes", "disk_free_bytes"), 0)
+        cpu_began, wall_began = time.process_time(), time.perf_counter()
+        for _ in range(samples):
+            time.sleep(1)
+            began = time.perf_counter()
+            sample = probe.sample(track_processes=True, track_foreground=True, max_processes=12)
+            timings.append((time.perf_counter() - began) * 1000)
+            if not (0 <= sample.cpu_percent <= 100 and
+                    0 < sample.memory_total_bytes and
+                    0 <= sample.memory_available_bytes <= sample.memory_total_bytes):
+                raise ValueError("Windows returned invalid aggregate CPU or memory counters")
+            for name in optional_counts:
+                optional_counts[name] += getattr(sample, name) is not None
+            process_counts.append(len(sample.processes))
+            foreground += sample.foreground_app is not None
+            own = probe._process(os.getpid())
+            if own:
+                memory.append(own[1] / 1024**2)
+        elapsed = time.perf_counter() - wall_began
+        cpu_seconds = time.process_time() - cpu_began
+        return {"status": "passed" if max(process_counts) else "partial",
+                "samples": samples, "collection": summary(timings),
+                "observed_process_count_min": min(process_counts),
+                "observed_process_count_max": max(process_counts),
+                "foreground_available_samples": foreground,
+                "diagnostic_process_peak_sampled_working_set_mb": round(max(memory), 2) if memory else None,
+                "diagnostic_process_cpu_seconds": round(cpu_seconds, 4),
+                "wall_seconds": round(elapsed, 3),
+                "single_core_cpu_percent": round(100 * cpu_seconds / elapsed, 3),
+                "optional_counter_samples": optional_counts,
+                "health": summarize_health(sample),
+                "note": "One-second diagnostic sampling; not dashboard overhead, battery life or optimization benefit. Foreground may be unavailable on CI/locked desktops; optional counter counts describe availability, not native qualification."}
 
 
 def run_report(live=False, require_native_arm64=False):

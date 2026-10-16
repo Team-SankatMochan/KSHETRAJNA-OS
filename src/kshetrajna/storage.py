@@ -9,6 +9,19 @@ from pathlib import Path
 from .models import Snapshot
 
 
+_OPTIONAL_SNAPSHOT_COLUMNS = (
+    "memory_commit_total_bytes", "memory_commit_limit_bytes", "memory_system_cache_bytes",
+    "memory_low_signal", "disk_total_bytes", "disk_free_bytes",
+)
+
+
+def _snapshot_row(row) -> dict:
+    result = dict(row)
+    if result.get("memory_low_signal") is not None:
+        result["memory_low_signal"] = bool(result["memory_low_signal"])
+    return result
+
+
 class EventStore:
     def __init__(self, path: Path):
         self.path = Path(path)
@@ -53,6 +66,10 @@ class EventStore:
             columns = {row[1] for row in db.execute("PRAGMA table_info(process_samples)")}
             if "created_ticks" not in columns:
                 db.execute("ALTER TABLE process_samples ADD COLUMN created_ticks INTEGER NOT NULL DEFAULT 0")
+            columns = {row[1] for row in db.execute("PRAGMA table_info(snapshots)")}
+            for column in _OPTIONAL_SNAPSHOT_COLUMNS:
+                if column not in columns:
+                    db.execute(f"ALTER TABLE snapshots ADD COLUMN {column} INTEGER")
 
     @contextmanager
     def _connect(self):
@@ -72,10 +89,15 @@ class EventStore:
     def record(self, snapshot: Snapshot, events: list[tuple[str, int | None, str | None]]) -> None:
         with self._connect() as db:
             cursor = db.execute(
-                "INSERT INTO snapshots (observed_at,cpu_percent,memory_total_bytes,memory_available_bytes,foreground_pid,foreground_app,idle_seconds) VALUES (?,?,?,?,?,?,?)",
+                "INSERT INTO snapshots (observed_at,cpu_percent,memory_total_bytes,memory_available_bytes,"
+                "foreground_pid,foreground_app,idle_seconds,memory_commit_total_bytes,"
+                "memory_commit_limit_bytes,memory_system_cache_bytes,memory_low_signal,"
+                "disk_total_bytes,disk_free_bytes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (snapshot.observed_at, snapshot.cpu_percent, snapshot.memory_total_bytes,
                  snapshot.memory_available_bytes, snapshot.foreground_pid, snapshot.foreground_app,
-                 snapshot.idle_seconds),
+                 snapshot.idle_seconds, snapshot.memory_commit_total_bytes,
+                 snapshot.memory_commit_limit_bytes, snapshot.memory_system_cache_bytes,
+                 snapshot.memory_low_signal, snapshot.disk_total_bytes, snapshot.disk_free_bytes),
             )
             db.executemany(
                 "INSERT INTO process_samples (snapshot_id,pid,name,cpu_percent,working_set_bytes,created_ticks) VALUES (?,?,?,?,?,?)",
@@ -96,7 +118,7 @@ class EventStore:
                 "SELECT pid,name,cpu_percent,working_set_bytes,created_ticks FROM process_samples WHERE snapshot_id=? ORDER BY cpu_percent DESC, working_set_bytes DESC",
                 (row["id"],),
             ).fetchall()
-            result = dict(row)
+            result = _snapshot_row(row)
             result.pop("id")
             result["processes"] = [dict(p) for p in processes]
             return result
@@ -104,10 +126,13 @@ class EventStore:
     def history(self, limit: int = 90) -> list[dict]:
         with self._connect() as db:
             rows = db.execute(
-                "SELECT observed_at,cpu_percent,memory_total_bytes,memory_available_bytes FROM snapshots ORDER BY id DESC LIMIT ?",
+                "SELECT observed_at,cpu_percent,memory_total_bytes,memory_available_bytes,"
+                "memory_commit_total_bytes,memory_commit_limit_bytes,memory_system_cache_bytes,"
+                "memory_low_signal,disk_total_bytes,disk_free_bytes "
+                "FROM snapshots ORDER BY id DESC LIMIT ?",
                 (limit,),
             ).fetchall()
-            return [dict(row) for row in reversed(rows)]
+            return [_snapshot_row(row) for row in reversed(rows)]
 
     def activity(self, limit: int = 30) -> list[dict]:
         with self._connect() as db:
@@ -149,7 +174,7 @@ class EventStore:
     def observations(self, limit: int = 720) -> list[dict]:
         with self._connect() as db:
             rows = db.execute("SELECT * FROM snapshots ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
-            return [dict(row) for row in reversed(rows)]
+            return [_snapshot_row(row) for row in reversed(rows)]
 
     def decisions(self, limit: int = 100) -> list[dict]:
         with self._connect() as db:
