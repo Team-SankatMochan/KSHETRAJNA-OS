@@ -38,6 +38,11 @@ class ReleaseToolTests(unittest.TestCase):
         path = self.root / "fixture.zip"
         with zipfile.ZipFile(path, "w") as zipped:
             for name, data in members:
+                if isinstance(name, str):
+                    member = zipfile.ZipInfo(name)
+                    # Keep malformed names on disk instead of sanitizing the fixture.
+                    member.filename = name
+                    name = member
                 zipped.writestr(name, data)
         return path
 
@@ -50,9 +55,27 @@ class ReleaseToolTests(unittest.TestCase):
                     tools.epoch()
 
     def test_unsafe_paths_are_rejected_before_extraction(self):
-        for name in ("../outside.py", "/absolute.py", "C:/x", "a\\x", "a//b", "a/./b", "AUX.txt", "a. /b", "a./b", "a/COM1.txt"):
-            with self.subTest(name=name), self.assertRaises(ValueError):
-                tools.scan_archive(self.archive([(name, b"fixture")]))
+        for name in ("../outside.py", "/absolute.py", "C:/x", "a\\x", "a\\", "a\x00hidden", "a/\x00hidden",
+                     "a//b", "a/./b", "AUX.txt", "a. /b", "a./b", "a/COM1.txt"):
+            with self.subTest(name=name):
+                artifact = self.archive([(name, b"fixture")])
+                with zipfile.ZipFile(artifact) as zipped:
+                    self.assertEqual(zipped.infolist()[0].orig_filename, name)
+                with self.assertRaisesRegex(ValueError, "Unsafe artifact member"):
+                    tools.scan_archive(artifact)
+
+        for raw, normalized in (("a\\x", "a/x"), ("a\\", "a/"),
+                                ("a\x00hidden", "a"), ("a/\x00hidden", "a/")):
+            with self.subTest(raw=raw, normalized=normalized):
+                artifact = self.archive([(raw, b"fixture")])
+                with zipfile.ZipFile(artifact) as zipped:
+                    member = zipped.infolist()[0]
+                self.assertEqual(member.orig_filename, raw)
+                # Emulate the Windows reader's normalized view on every host.
+                member.filename = normalized
+                with patch.object(zipfile.ZipFile, "infolist", return_value=[member]), \
+                        self.assertRaisesRegex(ValueError, "Unsafe artifact member"):
+                    tools.scan_archive(artifact)
 
     def test_archive_collisions_symlinks_and_credentials_are_rejected(self):
         with self.assertRaises(ValueError):

@@ -80,7 +80,8 @@ def scan_archive(path):
             raise ValueError("Artifact exceeds content limits")
         seen = set()
         for member in members:
-            name = member.filename
+            # ZipInfo.filename hides NUL suffixes and, on Windows, backslashes.
+            name = member.orig_filename
             safe_name(name.rstrip("/") if member.is_dir() else name)
             key = name.rstrip("/").casefold()
             mode = member.external_attr >> 16 & 0o170000
