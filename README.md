@@ -39,14 +39,15 @@ can route into an approved Desktop, while existing folders and named project
 scopes are reused across the selected locations. Downloads discovery uses
 Windows' actual folder location. Opt-in download watching refreshes the index and Sort AI preview after new files settle. Empty-file and exact-duplicate cleanup is a separate reviewed action surface. See [Sort AI setup and behavior](docs/SORT_AI.md) and [cleanup integration](docs/CLEANUP.md).
 
-**Coordinator-reported combined Linux check:** pinned CPython 3.13.16 ran **453
-tests: 450 passed, three skipped**. The last native Windows baseline remains
-`4d86a96`: x64 CPython 3.13.3 ran 276 with no skips; no newer native qualification
-is recorded. That Windows patch is not the reproducible pin. These source checks
-do not qualify a current package, ARM64 device or Docker image. Prepared release
-tooling also has a reported 26-pass isolated suite including MSI Upgrade-row
-audit logic, not a native installer lifecycle pass. This docs lane did not rerun
-either suite; the coordinator owns [qualification evidence](docs/VALIDATION.md).
+**Verified source checkpoint `4c215ef`:** pinned Linux CPython 3.13.16 ran
+**516 tests: 513 passed, three Windows-only skips**. Native Windows x64 CPython
+3.13.3 passed **490 selected application/source tests**, excluding the 26-test
+release-tool module because its commands require exactly 3.13.16. This is
+compatibility evidence, not a full pinned-runtime Windows qualification. The
+installed Linux wheel's isolated demo/asset/approval/shutdown smoke passed, and
+two fresh wheel builds matched the candidate bytes. These checks do not qualify
+a current Windows package, ARM64 device, signed installer or Docker image.
+See [commands, results and remaining gaps](docs/VALIDATION.md).
 The published 0.4.3 beta record is historical and does not qualify these later
 source changes. Historical pitch assets are retained under
 [`submission/`](submission/README.md).

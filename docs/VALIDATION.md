@@ -1,6 +1,76 @@
 # Validation record
 
-## Update: 16 October 2026 — phase-zero recovery stabilization
+## Update: 16 October 2026 — integrated implementation checkpoint
+
+Verified code revision: `4c215ef22df078003e574e96069872f251ecfaa9`, version
+**0.5.0**. This integrates the action ledger/system adapters, explicit consent and
+revocation, health observations, Basic/Expert UI, release-tool preparation and
+offline crash/verification tooling. It does **not** complete the final contract.
+
+Commands below ran from the repository root. `python` denotes the pinned local
+CPython **3.13.16** environment for Linux/build commands, not an arbitrary system
+Python. Packaging used hash-locked setuptools 80.9.0 and wheel 0.45.1.
+
+| Check | Actual result at this checkpoint |
+|---|---|
+| `python scripts/verify_source.py --js required` with `PYTHONPATH` unset | **516 run: 513 passed, three Windows-only skips**, zero failures/errors, Linux x86_64 CPython 3.13.16; unittest 54.053 seconds |
+| Verifier syntax stages | **95 Python files** compiled in memory; **seven JavaScript files** passed Node 24.21.0 `--check`; no browser execution |
+| Native source compatibility selection | **490 passed, zero skips**, Windows AMD64 CPython 3.13.3, 135.970 seconds; all discovered modules except `test_release_tools` |
+| Release-tool unit module | All **26 cases** included in the passing pinned Linux suite; native 3.13.3 release-command checks reject the wrong patch as designed |
+| `python scripts/release_tools.py build-wheel --output build/integrated-4c215ef` | Built and scanned `kshetrajna-0.5.0-py3-none-any.whl` |
+| `python scripts/smoke_runtime.py --wheel-dir build/integrated-4c215ef` | Installed offline into a temporary environment outside source; CPython 3.13.16, synthetic demo, local assets, approval guards and graceful shutdown passed |
+| `python scripts/check_reproducible.py --kind wheel --artifact build/integrated-4c215ef/kshetrajna-0.5.0-py3-none-any.whl` | Two fresh unsigned builds matched each other and the candidate; SHA-256 `3f4775d91ff009afbd063f24376ecd0363bbe405206f90e51053728ea219a660` |
+| Release configuration validation | Python/JSON/XML and immutable workflow-action pins passed; PowerShell AST parsing passed without executing signing/lifecycle scripts |
+| Diff whitespace | `git diff --check` passed |
+| Docker | `docker version` reported Docker unavailable in this WSL distro; no image build/run pass |
+
+The native compatibility command set `PYTHONPATH` to the absolute source folder
+**inside Windows**, discovered the suite, and selected every test whose module
+was not `test_release_tools`. It did not skip or mock the runtime gate and is not
+reported as a full Windows suite or final native qualification. The exact
+3.13.16 native source/bundled-runtime commands still need a suitable host.
+
+### Failures found and corrected before the checkpoint
+
+- The first integrated verifier lacked inherited source imports for subprocess
+  tests. Its worker now passes a scoped absolute source `PYTHONPATH`. Regression
+  children launched outside the repository with unset or competing import paths
+  pass; parent environment and private failure redaction are preserved.
+- The newly integrated crash fixture lacked the now-required explicit root
+  consent. It now approves only its disposable synthetic root. All six real
+  process-death/restart cases pass without weakening mutation assertions.
+- Windows ZIP name normalization concealed malformed backslash names. Artifact
+  validation now checks raw `ZipInfo.orig_filename`; tests preserve malformed
+  names on disk and cover normalized backslash/NUL views on either platform.
+- A native permission-generation repetition reproduced one WinError 5 at the
+  atomic settings replacement boundary in 20 runs. ConfigStore now retries only
+  Windows errors 5/32/33, five total attempts with at most 200 ms added sleep,
+  retaining the same closed/fsynced temporary file and atomic replacement.
+  Permanent failures propagate and leave old consent generations intact. Seven
+  deterministic tests and 20 native post-fix repetitions passed. The external
+  handle holder is unknown; scanner involvement is not established.
+- Review found a canonical approval response without reviewable target/effect
+  data and an unchecked destructive MSI Upgrade-row family. The persisted,
+  allowlisted review DTO and exact Upgrade-row contract now have regressions;
+  bounded follow-up audits closed both findings at code-review level.
+
+### Remaining gates and next work
+
+The canonical API advertises four wired kinds and eight deferred kinds, with
+`canonical_authority_complete:false`. Finish domain adapters and compatibility
+callers, metadata-only/content-consent migration, common delayed measurements
+and Windows pathname/reparse race hardening. Keep the existing domain journals
+authoritative; no cross-database atomicity or invented undo is claimed.
+
+Not qualified here: pinned-patch native x64 full/source and package matrix,
+ARM64, genuine WiX MSI output/audit, signing, install/upgrade/uninstall, Docker,
+real browser/keyboard/NVDA/Narrator, 320px/zoom, large 10k/50k/200k benchmarks,
+Snapdragon battery/thermal tests and ordinary-user validation. Build emitted a
+setuptools license-metadata deprecation warning; it did not fail. No personal
+files/apps were mutated, installer installed, release tag created or final
+artifact published by these checks. See `FINAL_RELEASE.md` and `ACTIONS.md`.
+
+## Historical update: 16 October 2026 — phase-zero recovery stabilization
 
 This checkout now contains the reversible cleanup milestone and version 0.5.0.
 The current local full-suite check used Linux x86_64 with the pinned CPython

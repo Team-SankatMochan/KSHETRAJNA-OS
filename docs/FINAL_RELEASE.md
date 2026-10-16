@@ -160,4 +160,23 @@ or claim 10/10 qualification until all applicable gates have evidence.
 Phase 0 was committed and pushed as `4d86a96`. Linux CPython 3.13.16: 276 run,
 274 passed, 2 Windows-only skips. Native Windows x64 CPython 3.13.3: 276 passed,
 no skips. Windows's patch is not the reproducible pin. See `VALIDATION.md`.
-Phases 2–11 are pending; this contract is not evidence that they are implemented.
+Implementation checkpoint `4c215ef` integrates the ledger, consent/revocation
+boundary, nullable health observations, Basic/Expert UI, release scaffolding and
+offline verification harness. The canonical API currently adapts memory trim,
+process close/terminate and four fixed external tools only. Eight other kinds
+remain deferred; legacy routes still own their domain journals/execution.
+`canonical_authority_complete` is explicitly false. See `ACTIONS.md`.
+
+At that checkpoint, pinned Linux CPython 3.13.16 ran 516 tests: 513 passed and
+three Windows-only tests skipped. Native x64 CPython 3.13.3 passed 490 selected
+application/source tests; the 26 release-tool tests require the pinned patch and
+were excluded from that compatibility run. Installed-wheel smoke and unsigned
+wheel reproducibility passed. These are not native final-artifact qualifications.
+
+Phases 2–11 are not promoted as a completed release program. Next implement the
+remaining exact-target canonical adapters, starting with file quarantine/restore
+over the existing journal, then their compatibility/CLI/assistant callers.
+Metadata-only/content-consent migration, common delayed measurements, native
+filesystem race hardening and the external qualification gates remain open.
+`VALIDATION.md` records actual evidence and failed attempts; no 1.0.0 tag,
+installer installation, signing or final publication is authorized by a test pass.
