@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -145,7 +146,16 @@ class ConfigStore:
                     json.dump({**asdict(settings), "_consent_versions": versions}, file, indent=2)
                     file.flush()
                     os.fsync(file.fileno())
-                os.replace(temp_path, self.path)
+                # Retry Windows access/sharing conflicts with the same fsynced file.
+                for attempt in range(5):
+                    try:
+                        os.replace(temp_path, self.path)
+                        break
+                    except OSError as error:
+                        if (os.name != "nt" or getattr(error, "winerror", None) not in (5, 32, 33)
+                                or attempt == 4):
+                            raise
+                        time.sleep(0.05)
             finally:
                 if os.path.exists(temp_path):
                     os.unlink(temp_path)
