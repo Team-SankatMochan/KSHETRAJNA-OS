@@ -7,16 +7,18 @@ import threading
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 from .service import AssistantService
 from .chat import ChatAssistant
 from .config import public_error
+from .action_store import ActionStore, ActionStoreError
+from .action_service import ActionService, ActionApiError
 
 
 class DashboardServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, port: int, collector, config, store, *, demo=False):
+    def __init__(self, port: int, collector, config, store, *, demo=False, action_store=None):
         self.collector = collector
         collector.demo = demo
         self.config = config
@@ -24,6 +26,8 @@ class DashboardServer(ThreadingHTTPServer):
         self.token = secrets.token_urlsafe(32)
         self.service = AssistantService(collector, config, store, demo=demo)
         self.chat = ChatAssistant(self.service)
+        self.action_store = action_store if action_store is not None else ActionStore(config.directory / "actions.db")
+        self.actions = ActionService(self.action_store, self.service, self.chat.processes)
         self.file_service = None
         self.shutdown_gate = threading.Lock()
         self.shutdown_requested = False
@@ -92,7 +96,142 @@ class DashboardHandler(BaseHTTPRequestHandler):
             raise ValueError("Invalid action_id")
         return value
 
+    @staticmethod
+    def _is_v1(path):
+        return path == "/api/v1" or path.startswith("/api/v1/")
+
+    def _v1_error(self, error):
+        if isinstance(error, ActionApiError):
+            status, code = error.status, error.code
+        elif isinstance(error, ActionStoreError):
+            code = error.code
+            status = (404 if code == "not_found" else 503 if code in
+                      ("storage_error", "missing_store", "unsupported_schema", "invalid_clock") else
+                      409 if code in ("expired", "revoked", "invalid_transition", "evidence_mismatch",
+                                      "idempotency_conflict", "clock_rollback", "immutable_result") else 400)
+        else:
+            status, code = 503, "operation_unavailable"
+        self._json(status, {"error": code})
+
+    def _v1_auth(self, *, write=False):
+        code = None
+        if not self._allowed_host():
+            code = "host_rejected"
+        token = self.headers.get("X-Kshetrajna-Token", "")
+        if code is None and (not token.isascii() or not hmac.compare_digest(token, self.server.token)):
+            code = "authentication_required"
+        origin = self.headers.get("Origin")
+        allowed = {f"http://127.0.0.1:{self.server.server_port}", f"http://localhost:{self.server.server_port}"}
+        if code is None and ((write or origin is not None) and origin not in allowed):
+            code = "origin_rejected"
+        if code:
+            self.close_connection = True
+            self._json(403, {"error": code})
+            return False
+        return True
+
+    @staticmethod
+    def _v1_query(query):
+        try:
+            values = parse_qs(query, keep_blank_values=True, strict_parsing=True, max_num_fields=2)
+            if set(values) - {"limit", "cursor"} or any(len(value) != 1 for value in values.values()):
+                raise ValueError
+            raw_limit = values.get("limit", ["50"])[0]
+            if not raw_limit.isascii() or not raw_limit.isdecimal() or not 1 <= int(raw_limit) <= 100:
+                raise ValueError
+            cursor = values.get("cursor", [None])[0]
+            if cursor is not None and (not cursor.isascii() or not cursor.isdecimal() or
+                                       len(cursor) > 19 or not 0 < int(cursor) <= 2**63 - 1 or cursor[0] == "0"):
+                raise ValueError
+            return int(raw_limit), cursor
+        except ValueError:
+            raise ActionApiError("invalid_pagination") from None
+
+    def _v1_get(self, path, query):
+        if not self._v1_auth():
+            return
+        try:
+            parts = path.split("/")
+            if path == "/api/v1/actions":
+                limit, cursor = self._v1_query(query)
+                self._json(200, self.server.action_store.list_actions(limit=limit, cursor=cursor))
+            elif len(parts) == 6 and parts[:4] == ["", "api", "v1", "actions"] and parts[5] == "events":
+                limit, cursor = self._v1_query(query)
+                events = self.server.action_store.events(parts[4])
+                events = [event for event in events if cursor is None or event["version"] > int(cursor)]
+                self._json(200, {"items": events[:limit], "next_cursor": str(events[limit - 1]["version"])
+                                if len(events) > limit else None})
+            elif path == "/api/v1/capabilities" or (len(parts) == 5 and parts[:4] == ["", "api", "v1", "actions"]):
+                if query:
+                    raise ActionApiError("invalid_request")
+                self._json(200, self.server.actions.capabilities() if path == "/api/v1/capabilities"
+                           else {"action": self.server.actions.detail(parts[4])})
+            else:
+                raise ActionApiError("not_found", 404)
+        except Exception as error:
+            self._v1_error(error)
+
+    def _v1_post(self, path, query):
+        if not self._v1_auth(write=True):
+            return
+        try:
+            if query:
+                raise ActionApiError("invalid_request")
+            lengths = self.headers.get_all("Content-Length", [])
+            if (len(lengths) != 1 or not lengths[0].isascii() or not lengths[0].isdecimal() or
+                    len(lengths[0]) > 6 or not 0 < int(lengths[0]) <= 4096 or self.headers.get("Transfer-Encoding")):
+                raise ActionApiError("invalid_request_size", 413)
+            if self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
+                raise ActionApiError("json_required", 415)
+
+            def unique_object(pairs):
+                result = {}
+                for key, value in pairs:
+                    if key in result:
+                        raise ValueError
+                    result[key] = value
+                return result
+
+            def invalid_constant(value):
+                raise ValueError
+
+            try:
+                body = json.loads(self.rfile.read(int(lengths[0])).decode("utf-8"),
+                                  object_pairs_hook=unique_object, parse_constant=invalid_constant)
+                if type(body) is not dict:
+                    raise ValueError
+            except (ValueError, UnicodeError, RecursionError):
+                raise ActionApiError("invalid_json") from None
+            parts = path.split("/")
+            if path == "/api/v1/actions":
+                self._json(201, {"action": self.server.actions.propose(body)})
+            elif path == "/api/v1/actions/erase-history":
+                self._json(200, self.server.actions.erase_history(body))
+            elif (len(parts) == 6 and parts[:4] == ["", "api", "v1", "actions"] and
+                  parts[5] in ("consent", "execute")):
+                operation = self.server.actions.consent if parts[5] == "consent" else self.server.actions.execute
+                self._json(200, {"action": operation(parts[4], body)})
+            else:
+                raise ActionApiError("not_found", 404)
+        except Exception as error:
+            self.close_connection = True
+            self._v1_error(error)
+
+    def _unsupported_method(self):
+        if self._is_v1(urlsplit(self.path).path):
+            if self._v1_auth(write=True):
+                self.close_connection = True
+                self._json(405, {"error": "method_not_allowed"})
+        else:
+            self.send_error(501, "Unsupported method")
+
+    do_PUT = do_PATCH = do_DELETE = _unsupported_method
+
     def do_GET(self) -> None:
+        request = urlsplit(self.path)
+        if self._is_v1(request.path):
+            self._v1_get(request.path, request.query)
+            return
         if not self._allowed_host():
             self._json(403, {"error": "Host rejected"})
             return
@@ -233,6 +372,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._json(404, {"error": "Not found"})
 
     def do_POST(self) -> None:
+        request = urlsplit(self.path)
+        if self._is_v1(request.path):
+            self._v1_post(request.path, request.query)
+            return
         if not self._allowed_host():
             self.close_connection = True
             self._json(403, {"error": "Host rejected"})
@@ -273,13 +416,20 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         threading.Thread(target=self.server.shutdown, daemon=True).start()
             elif path == "/api/settings":
                 with self.server.collector._gate:
+                    previous = self.server.actions.permission_versions()
                     result = self.server.collector.update_settings(body)
+                    self.server.actions.permissions_changed(previous)
                     service.tick()
                 self._json(200, {"settings": asdict(result)})
             elif path == "/api/delete":
-                service.delete_history(confirm=body.get("confirm"))
+                if body.get("confirm") is not True:
+                    raise ValueError("Deleting recorded history requires confirm=true")
+                with self.server.collector._gate:
+                    self.server.actions.revoke_pending()
+                    service.delete_history(confirm=body.get("confirm"))
                 self.server.chat.clear()
-                self._json(200, {"deleted": True})
+                self._json(200, {"deleted": True, "scope": "telemetry_history",
+                                 "canonical_history": "retained_use_explicit_erasure"})
             elif path == "/api/chat/status":
                 self._json(200, self.server.chat.status(force=body.get("refresh") is True))
             elif path == "/api/chat/message":
@@ -326,7 +476,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 service.activate_workspace(body.get("name"))
                 self._json(200, {"activated": True})
             elif path == "/api/demo/scenario":
-                service.change_scenario(body.get("scenario"))
+                with self.server.collector._gate:
+                    service.change_scenario(body.get("scenario"))
+                    self.server.actions.revoke_pending()
                 self._json(200, {"changed": True})
             elif path == '/api/files/locations/approve' and self.server.file_service:
                 self._json(200, self.server.file_service.approve_locations(body.get('locations'), consent=body.get('consent')))

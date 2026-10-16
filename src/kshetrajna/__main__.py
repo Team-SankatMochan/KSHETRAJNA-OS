@@ -19,6 +19,7 @@ from .file_storage import FileStore
 from .file_service import FileService
 from .file_demo import seed_file_demo
 from .download_watch import DownloadWatcher
+from .action_store import ActionStore
 
 
 def main() -> int:
@@ -57,14 +58,15 @@ def main() -> int:
         parser.error(f"Settings could not be loaded: {error}")
     store = EventStore(directory / "events.db")
     file_store = FileStore(directory / "files.db")
+    action_store = ActionStore(directory / "actions.db")
     probe = DemoProbe() if args.demo else WindowsProbe()
     if args.demo:
         seed_demo(store, probe)
         seed_file_demo(file_store)
-    file_service = FileService(file_store, demo=args.demo)
-    collector = Collector(probe, config, store)
+    file_service = FileService(file_store, demo=args.demo, config=config)
+    collector = Collector(probe, config, store, demo=args.demo)
     try:
-        server = DashboardServer(port, collector, config, store, demo=args.demo)
+        server = DashboardServer(port, collector, config, store, demo=args.demo, action_store=action_store)
         server.file_service = file_service
         server.service.file_service = file_service
     except OSError as error:
