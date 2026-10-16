@@ -99,7 +99,7 @@ class ScanLifecycleTests(unittest.TestCase):
             cancelled.set()
 
         self.enterContext(patch.object(cancel, 'set', side_effect=notify_cancel))
-        job = self.spawn(self.service.delete_all)
+        job = self.spawn(lambda: self.service.delete_all(confirm=True))
         self.assertTrue(cancelled.wait(self.WAIT), 'Deletion did not request cancellation')
         return job
 
@@ -221,7 +221,7 @@ class ScanLifecycleTests(unittest.TestCase):
 
     def test_add_root_rejected_while_catalog_deletion_waits(self):
         self.assert_admission_blocked_during_delete(
-            lambda _, path: self.service.add_root(str(path), 'New'))
+            lambda _, path: self.service.add_root(str(path), 'New', consent=True))
 
     def test_location_approval_rejected_while_catalog_deletion_waits(self):
         self.assert_admission_blocked_during_delete(
@@ -235,7 +235,7 @@ class ScanLifecycleTests(unittest.TestCase):
     def test_second_catalog_deletion_rejected_without_waiting(self):
         root_id, _, release, _ = self.block_flush()
         deletion = self.start_delete(root_id)
-        errors = self.finished(self.spawn(self.service.delete_all))
+        errors = self.finished(self.spawn(lambda: self.service.delete_all(confirm=True)))
         self.assertEqual(len(errors), 1)
         self.assertIsInstance(errors[0], ValueError)
         self.assertRegex(str(errors[0]), 'delet')
@@ -246,9 +246,9 @@ class ScanLifecycleTests(unittest.TestCase):
         root_id, _, release, _ = self.block_flush()
         delete_all = self.service.delete_all
 
-        def nested_delete():
+        def nested_delete(*, confirm=False):
             with self.service._gate:
-                delete_all()
+                delete_all(confirm=confirm)
 
         with patch.object(self.service, 'delete_all', side_effect=nested_delete):
             deletion = self.start_delete(root_id)
@@ -275,7 +275,7 @@ class ScanLifecycleTests(unittest.TestCase):
 
         with patch.object(self.service, '_scan_worker'), \
                 patch.object(self.store, 'clear_all', side_effect=interleaved_clear):
-            self.assertEqual(self.finished(self.spawn(self.service.delete_all)), [])
+            self.assertEqual(self.finished(self.spawn(lambda: self.service.delete_all(confirm=True))), [])
         self.assertEqual(len(admissions), 1, 'New scan entered between drain and clear_all')
         self.assertRegex(str(admissions[0]), 'delet')
         self.assertEqual(active_at_clear, [False])
@@ -285,11 +285,11 @@ class ScanLifecycleTests(unittest.TestCase):
         root_id, _ = self.root()
         failure = RuntimeError('clear_all failed')
         with patch.object(self.store, 'clear_all', side_effect=failure):
-            self.assertEqual(self.finished(self.spawn(self.service.delete_all)), [failure])
+            self.assertEqual(self.finished(self.spawn(lambda: self.service.delete_all(confirm=True))), [failure])
 
         self.service.rescan_root(root_id)
         self.join_scan()
-        added = self.service.add_root(str(self.path('added')), 'Added')
+        added = self.service.add_root(str(self.path('added')), 'Added', consent=True)
         approved = self.service.approve_locations(
             [{'path': str(self.path('approved')), 'label': 'Approved'}], consent=True)
         self.join_scan()
@@ -298,7 +298,7 @@ class ScanLifecycleTests(unittest.TestCase):
         for target_id in (root_id, added['id'], approved['approved'][0]['id']):
             self.assertEqual(self.store.get_root(target_id)['status'], 'ready')
             self.assert_gate_released(target_id)
-        self.service.delete_all()
+        self.service.delete_all(confirm=True)
         self.assertEqual(self.store.get_roots(), [])
 
     def test_uncooperative_scan_times_out_without_deleting_catalog(self):
@@ -307,7 +307,7 @@ class ScanLifecycleTests(unittest.TestCase):
         # depending on scheduler speed or waiting the production timeout.
         with patch.object(self.service, '_SCAN_STOP_TIMEOUT', 0, create=True), \
                 patch.object(self.store, 'clear_all', wraps=self.store.clear_all) as clear:
-            errors = self.finished(self.spawn(self.service.delete_all))
+            errors = self.finished(self.spawn(lambda: self.service.delete_all(confirm=True)))
         self.assertEqual(len(errors), 1)
         self.assertIsInstance(errors[0], ValueError)
         self.assertRegex(str(errors[0]), '[Tt]imed out')

@@ -186,7 +186,7 @@ $('settings-form').addEventListener('submit', async (event) => {
 });
 $('delete-button').addEventListener('click', async () => {
   if (!window.confirm('Restore active trials and delete recorded history, saved workspaces, and learned patterns?')) return;
-  try { await post('/api/delete'); await refresh(); setFeedback('Recorded history deleted.'); }
+  try { await post('/api/delete', {confirm: true}); await refresh(); setFeedback('Recorded history deleted.'); }
   catch (error) { setFeedback(error.message, true); }
 });
 $('quit-button').addEventListener('click', async () => {

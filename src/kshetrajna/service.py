@@ -10,6 +10,7 @@ from .actions import SimulatedPriorityDriver, WindowsPriorityDriver
 from .demo import SCENARIOS, seed_demo
 from .intelligence import analyze, recommend
 from .maintenance import MaintenanceService
+from .config import opaque_id, public_error
 from . import __version__
 
 
@@ -33,7 +34,7 @@ class AssistantService:
         latest = self.store.latest()
         model = analyze(self.store.observations(12000), latest, [],
                         settings.idle_threshold_seconds)
-        if not settings.enabled or not settings.track_foreground:
+        if not settings.enabled or (not self.demo and settings.device_consent is not True) or not settings.track_foreground:
             model["prediction"] = None
             model["prediction_reason"] = "Predictions are paused while foreground collection is disabled."
         elif latest and self._clock() - datetime.fromisoformat(latest["observed_at"]).timestamp() > 90:
@@ -78,10 +79,14 @@ class AssistantService:
                     "health": {"last_error": self.collector.last_error,
                                "last_sample_at": self.collector.last_sample_at}}
 
-    def approve(self, suggestion_id):
+    def approve(self, suggestion_id, *, confirm=False):
+        if confirm is not True:
+            raise ValueError("Priority trials require confirm=true")
+        if not isinstance(suggestion_id, str) or not 1 <= len(suggestion_id) <= 200:
+            raise ValueError("Invalid recommendation")
         with self.collector._gate:
             settings = self.config.load()
-            if not settings.enabled:
+            if not settings.enabled or (not self.demo and settings.device_consent is not True):
                 raise ValueError("Enable collection before approving a trial")
             if not self.demo and not settings.allow_priority_changes:
                 raise ValueError("Enable live priority trials in Privacy controls first")
@@ -94,7 +99,10 @@ class AssistantService:
             proposal = next((p for p in proposals if p["id"] == suggestion_id and p["kind"] == "priority"), None)
             if not proposal:
                 raise ValueError("This proposal is no longer available")
-            plan = self._driver().prepare(proposal["target"])
+            try:
+                plan = self._driver().prepare(proposal["target"])
+            except (OSError, ValueError) as error:
+                raise ValueError(public_error(error)) from None
             decision = {"id": uuid.uuid4().hex, "suggestion_id": suggestion_id,
                         "created_at": datetime.now(timezone.utc).isoformat(),
                         "expires_at": self._clock() + 60, "status": "prepared",
@@ -107,6 +115,9 @@ class AssistantService:
                 self._driver().apply(plan)
                 decision["status"] = "active"
                 self.store.save_decision(decision)
+            except OSError:
+                self._restore(decision)
+                raise ValueError("Windows could not apply this priority trial; the target may have changed or denied access") from None
             except Exception:
                 self._restore(decision)
                 raise
@@ -119,7 +130,7 @@ class AssistantService:
         except Exception:
             decision["status"] = "restore_failed"
             decision["error"] = "Restore could not complete. Retry Undo or restart Kshetrajna."
-            logging.getLogger(__name__).exception("Priority restore failed")
+            logging.getLogger(__name__).error("Priority restore failed; retry Undo or restart Kshetrajna")
         if decision["status"] != "restore_failed":
             after = [row for row in self.store.history(90) if row["observed_at"] > decision["created_at"]]
             before = decision["before"]
@@ -135,7 +146,10 @@ class AssistantService:
         self.store.save_decision(decision)
         return decision
 
-    def undo(self, decision_id):
+    def undo(self, decision_id, *, confirm=False):
+        if confirm is not True:
+            raise ValueError("Undo requires confirm=true")
+        opaque_id(decision_id, "decision_id")
         with self.collector._gate:
             decision = next((d for d in self.store.pending_decisions() if d["id"] == decision_id), None)
             if not decision:
@@ -154,7 +168,8 @@ class AssistantService:
             for decision in self.store.pending_decisions():
                 regained_focus = latest and latest.get("foreground_pid") == decision["plan"]["pid"]
                 if (self._clock() >= decision["expires_at"] or regained_focus or
-                        not settings.enabled or (not self.demo and not settings.allow_priority_changes)):
+                        not settings.enabled or (not self.demo and
+                        (settings.device_consent is not True or not settings.allow_priority_changes))):
                     self._restore(decision)
 
     def dismiss(self, suggestion_id):
@@ -166,6 +181,7 @@ class AssistantService:
                                      "mode": "demo" if self.demo else "live"})
 
     def feedback(self, decision_id, value):
+        opaque_id(decision_id, "decision_id")
         if value not in ("helpful", "not_helpful"):
             raise ValueError("Invalid feedback")
         with self.collector._gate:
@@ -202,12 +218,14 @@ class AssistantService:
             self.collector.probe.index = 0
             seed_demo(self.store, self.collector.probe)
 
-    def delete_history(self):
+    def delete_history(self, *, confirm=False):
+        if confirm is not True:
+            raise ValueError("Deleting recorded history requires confirm=true")
         with self.collector._gate:
             self.restore_all()
             if self.store.pending_decisions():
                 raise ValueError("A restore is pending. Its recovery record must be kept until restoration completes.")
-            self.collector.delete_history()
+            self.collector.delete_history(confirm=True)
             self.maintenance.plans.clear()
             self.active_workspace = None
 

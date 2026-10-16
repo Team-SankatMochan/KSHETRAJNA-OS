@@ -30,7 +30,7 @@ class TestBackendHardening(unittest.TestCase):
         # service's root cleanup because file_actions has a restrictive FK.
         with self.store._connect() as db:
             db.execute("DELETE FROM file_actions")
-        self.service.delete_all()
+        self.service.delete_all(confirm=True)
 
     def wait_scan(self, root_id):
         while True:
@@ -48,7 +48,7 @@ class TestBackendHardening(unittest.TestCase):
         # exercise and proves the scanner communicates the truncation to the
         # service instead of silently returning a ready scan.
         with patch("kshetrajna.file_scanner.MAX_FILES", 2):
-            root_id = self.service.add_root(str(root), "Root")["id"]
+            root_id = self.service.add_root(str(root), "Root", consent=True)["id"]
             result = self.wait_scan(root_id)
 
         self.assertEqual(result["status"], "truncated")
@@ -85,9 +85,9 @@ class TestBackendHardening(unittest.TestCase):
         file_path = Path(self.temp.name) / "not-a-directory"
         file_path.write_text("file")
         with self.assertRaisesRegex(ValueError, "directory"):
-            self.service.add_root(str(file_path), "File")
+            self.service.add_root(str(file_path), "File", consent=True)
         with self.assertRaisesRegex(ValueError, "Path traversal"):
-            self.service.add_root(str(file_path.parent / ".." / file_path.name), "Traversal")
+            self.service.add_root(str(file_path.parent / ".." / file_path.name), "Traversal", consent=True)
 
         target = Path(self.temp.name) / "target"
         target.mkdir()
@@ -97,7 +97,7 @@ class TestBackendHardening(unittest.TestCase):
         except (OSError, NotImplementedError):
             self.skipTest("symlinks unavailable")
         with self.assertRaisesRegex(ValueError, "Symlinks and reparse points"):
-            self.service.add_root(str(link), "Link")
+            self.service.add_root(str(link), "Link", consent=True)
 
     def test_post_mutation_race_returns_failed(self):
         root = Path(self.temp.name) / "root"
@@ -185,7 +185,7 @@ class TestMalformedFileApiIds(unittest.TestCase):
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=2)
-        self.file_service.delete_all()
+        self.file_service.delete_all(confirm=True)
 
     def request(self, method, path, body=None):
         connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=2)

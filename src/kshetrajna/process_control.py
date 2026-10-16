@@ -1,6 +1,7 @@
 """User-reviewed application closure. Low CPU never establishes safe termination."""
 
 import ctypes
+import copy
 import ntpath
 import os
 import secrets
@@ -9,6 +10,7 @@ from ctypes import wintypes
 from datetime import datetime, timezone
 
 from .telemetry import FILETIME, WindowsProbe, _bind
+from .config import TELEMETRY_PERMISSIONS, opaque_id
 
 APP_ALLOWLIST = frozenset({"chrome.exe", "msedge.exe", "firefox.exe", "code.exe",
                           "notepad.exe", "notepad++.exe", "discord.exe", "spotify.exe",
@@ -138,9 +140,12 @@ class ProcessControlService:
         self.clock = time.time
 
     def candidates(self):
-        settings, latest = self.config.load(), self.store.latest()
-        if (not settings.enabled or not settings.track_processes or not settings.track_foreground or
-                not latest or latest.get("foreground_pid") is None or
+        settings = self.config.load()
+        if (not settings.enabled or (not self.demo and settings.device_consent is not True) or
+                not settings.track_processes or not settings.track_foreground):
+            return []
+        latest = self.store.latest()
+        if (not latest or latest.get("foreground_pid") is None or
                 not 0 <= self.clock() - datetime.fromisoformat(latest["observed_at"]).timestamp() <= 30):
             return []
         history = self.store.process_window(now=datetime.fromtimestamp(self.clock(), timezone.utc))
@@ -168,8 +173,9 @@ class ProcessControlService:
     def preview(self, pid, action):
         if type(pid) is not int or action not in ("close", "terminate"):
             raise ValueError("Choose one PID and a supported action")
-        with self.collector._gate:
+        with self.collector._gate, self.config._lock:
             self._gate()
+            consent_versions = self.config.consent_versions("allow_process_control", *TELEMETRY_PERMISSIONS)
             target = next((p for p in self.candidates() if p["pid"] == pid), None)
             if not target:
                 raise ValueError("Target is unavailable, foreground, protected or outside the application list")
@@ -181,18 +187,22 @@ class ProcessControlService:
                     "expires_at": now + 60, "undo": UNDO,
                     "title": f"{'Force terminate' if action == 'terminate' else 'Request close'}: {target['name']} (PID {pid})",
                     "effect": "Force termination can lose unsaved work and interrupt useful background tasks." if action == "terminate" else "Ask this app's windows to close normally. Save prompts may appear.",
-                    "mode": "demo" if self.demo else "live"}
+                    "mode": "demo" if self.demo else "live", "consent_versions": consent_versions}
             self.plans[plan["id"]] = plan
-            return plan
+            return copy.deepcopy(plan)
 
     def execute(self, plan_id, *, confirm=False, typed_name=""):
-        if not isinstance(plan_id, str) or confirm is not True:
+        if confirm is not True:
             raise ValueError("Explicit confirmation is required")
-        with self.collector._gate:
+        opaque_id(plan_id, "plan_id")
+        with self.collector._gate, self.config._lock:
             self._gate()
             plan = self.plans.get(plan_id)
             if not plan or plan["expires_at"] <= self.clock():
                 raise ValueError("Preview expired or already used")
+            if plan["consent_versions"] != self.config.consent_versions("allow_process_control", *TELEMETRY_PERMISSIONS):
+                self.plans.pop(plan_id)
+                raise ValueError("Process-control consent changed; request a fresh preview")
             if plan["action"] == "terminate" and typed_name != plan["target"]["name"]:
                 raise ValueError("Type the exact app name to confirm force termination")
             current = next((p for p in self.candidates() if p["pid"] == plan["target"]["pid"]), None)

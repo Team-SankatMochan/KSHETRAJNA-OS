@@ -25,8 +25,8 @@ class OrganizationTests(unittest.TestCase):
         (self.source / 'unclear.bin').write_bytes(b'unknown')
         self.store = FileStore(self.base / 'files.db')
         self.service = FileService(self.store)
-        self.src = self.service.add_root(str(self.source), 'Downloads')['id']
-        self.dst = self.service.add_root(str(self.target), 'Documents')['id']
+        self.src = self.service.add_root(str(self.source), 'Downloads', consent=True)['id']
+        self.dst = self.service.add_root(str(self.target), 'Documents', consent=True)['id']
         self.wait()
 
     def wait(self):
@@ -70,7 +70,7 @@ class OrganizationTests(unittest.TestCase):
             self.assertEqual(self.store.get_file(s['file_id'])['root_id'], self.dst)
         with self.assertRaisesRegex(ValueError, 'recovery'):
             self.service.remove_root(self.dst)
-        self.assertEqual(self.service.undo_sort_plan(plan['id'])['status'], 'rolled_back')
+        self.assertEqual(self.service.undo_sort_plan(plan['id'], confirm=True)['status'], 'rolled_back')
         for s in project_files:
             self.assertTrue((self.source / s['source_relative']).exists())
             self.assertEqual(self.store.get_file(s['file_id'])['root_id'], self.src)
@@ -96,12 +96,12 @@ class OrganizationTests(unittest.TestCase):
         result = self.service.approve_sort_idea(plan['id'], suggestion_id=photo['id'], confirm=True)
         self.assertEqual(len(result['applied']), 1)
         self.assertTrue((self.target / 'Pictures' / 'holiday.jpg').exists())
-        self.service.undo_sort_plan(plan['id'])
+        self.service.undo_sort_plan(plan['id'], confirm=True)
 
     def test_downloads_clear_files_route_to_selected_desktop_root(self):
         desktop = self.base / 'Desktop'
         desktop.mkdir()
-        desktop_id = self.service.add_root(str(desktop), 'Desktop')['id']
+        desktop_id = self.service.add_root(str(desktop), 'Desktop', consent=True)['id']
         self.wait()
 
         plan = self.service.generate_sort_plan(self.src, True, root_ids=[self.src, desktop_id])
@@ -114,13 +114,13 @@ class OrganizationTests(unittest.TestCase):
         self.assertEqual(len(result['applied']), 1)
         self.assertTrue((desktop / 'Pictures' / 'holiday.jpg').exists())
         self.assertFalse((self.source / 'holiday.jpg').exists())
-        self.assertEqual(self.service.undo_sort_plan(plan['id'])['status'], 'rolled_back')
+        self.assertEqual(self.service.undo_sort_plan(plan['id'], confirm=True)['status'], 'rolled_back')
         self.assertTrue((self.source / 'holiday.jpg').exists())
 
     def test_downloads_route_to_any_approved_desktop_by_default(self):
         desktop = self.base / 'Desktop'
         desktop.mkdir()
-        desktop_id = self.service.add_root(str(desktop), 'Desktop')['id']
+        desktop_id = self.service.add_root(str(desktop), 'Desktop', consent=True)['id']
         self.wait()
 
         plan = self.service.generate_sort_plan(self.src, True)
@@ -130,7 +130,7 @@ class OrganizationTests(unittest.TestCase):
     def test_downloads_can_keep_category_moves_in_downloads_when_disabled(self):
         desktop = self.base / 'Desktop'
         desktop.mkdir()
-        self.service.add_root(str(desktop), 'Desktop')
+        self.service.add_root(str(desktop), 'Desktop', consent=True)
         self.wait()
 
         plan = self.service.generate_sort_plan(self.src, True, route_downloads_to_desktop=False)
@@ -141,7 +141,7 @@ class OrganizationTests(unittest.TestCase):
     def test_unavailable_desktop_is_not_used_as_an_automatic_destination(self):
         desktop = self.base / 'Desktop'
         desktop.mkdir()
-        desktop_id = self.service.add_root(str(desktop), 'Desktop')['id']
+        desktop_id = self.service.add_root(str(desktop), 'Desktop', consent=True)['id']
         self.wait()
         self.store.update_root_status(desktop_id, 'error', error='Desktop unavailable')
 
@@ -244,7 +244,7 @@ class OrganizationTests(unittest.TestCase):
         self.service.action_manager.reconcile_actions()
         self.assertEqual(self.store.get_file_action(action_id=action['id'])['status'], 'applied')
         self.assertEqual(self.store.get_file(row['id'])['root_id'], self.dst)
-        self.service.undo_action(action['id'])
+        self.service.undo_action(action['id'], confirm=True)
         self.assertTrue((self.source / row['relative_path']).exists())
 
     def test_scan_many_locations_has_one_explicit_consent_and_does_not_move(self):

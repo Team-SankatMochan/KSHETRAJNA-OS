@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import ntpath
+import os
 import re
 import sys
 import tempfile
@@ -19,9 +21,9 @@ from http.client import HTTPException
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode, urlsplit, urlunsplit
-from urllib.request import Request, urlopen
+from urllib.request import Request, build_opener, ProxyHandler, HTTPRedirectHandler
 
-from .config import default_data_dir
+from .config import default_data_dir, opaque_id, public_error
 from .file_demo import seed_file_demo
 from .file_service import FileService
 from .file_storage import FileStore
@@ -30,6 +32,16 @@ from .known_folders import discover_known_folders
 
 
 MAX_JSON_LINE = 64 * 1024
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        return None
+
+
+def urlopen(request, *, timeout):
+    # Keep credentials on the approved loopback endpoint, ignoring environment proxies.
+    return build_opener(ProxyHandler({}), _NoRedirect()).open(request, timeout=timeout)
 
 
 def _require_bool(value, name: str) -> bool:
@@ -54,12 +66,13 @@ def _cli_positive_id(value: str) -> int:
 
 
 def _action_id(value, name: str = "action_id") -> str:
-    if (not isinstance(value, str) or not value or len(value) > 200
-            or not value.isascii()
-            or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
-                   for character in value)):
-        raise ValueError(f"Invalid {name}")
-    return value
+    return opaque_id(value, name)
+
+
+def _root_path_key(path: str) -> str:
+    if FileService._validate_root_form(path):
+        return ntpath.normcase(ntpath.normpath(path))
+    return os.path.normcase(os.path.abspath(path))
 
 
 def _loopback_base(url: str) -> str:
@@ -103,6 +116,8 @@ class JarvisCommandBridge:
 
     @classmethod
     def _validate_args(cls, command: str, args: dict) -> None:
+        if "consent" in args:
+            _require_bool(args["consent"], "consent")
         scope = ("root_id", "path", "known_folder")
         if sum(args.get(key) is not None for key in scope) > 1:
             raise ValueError("Choose only one of root_id, path, or known_folder")
@@ -111,6 +126,10 @@ class JarvisCommandBridge:
         for key in ("path", "known_folder"):
             if args.get(key) is not None and (not isinstance(args[key], str) or not args[key]):
                 raise ValueError(f"{key} must be nonempty text")
+        if args.get("path") is not None:
+            _root_path_key(args["path"])
+        if args.get("known_folder") is not None and args.get("consent") is not True:
+            raise ValueError("Known-folder discovery for approval requires consent=true (CLI: --consent); use root_id for approved roots")
         if "size_min" in args:
             raise ValueError("size_min is not supported by the command bridge")
         if "action_id" in args and command not in cls._QUARANTINE_RESTORE:
@@ -135,6 +154,7 @@ class JarvisCommandBridge:
                 raise ValueError("Provide root_id, path, or known_folder")
             _require_bool(args.get("create_folders", False), "create_folders")
         if command in ("sort_apply", "sort_undo"):
+            _action_id(args.get("plan_id"), "plan_id")
             if _require_bool(args.get("confirm", False), "confirm") is not True:
                 raise ValueError(f"{command} requires confirm=true")
 
@@ -167,15 +187,17 @@ class JarvisCommandBridge:
         if not isinstance(path, str) or not path:
             raise ValueError("Provide root_id, path, or known_folder")
 
-        path_obj = Path(path).resolve(strict=True)
+        path_key = _root_path_key(path)
         for root in self.file_service.store.get_roots():
             try:
-                if Path(root["path"]).resolve(strict=True) == path_obj:
+                if root["status"] != "removed" and _root_path_key(root["path"]) == path_key:
                     self._wait_for_root(root["id"])
                     return root["id"]
-            except OSError:
+            except ValueError:
                 continue
-        added = self.file_service.add_root(str(path_obj), args.get("label", path_obj.name or "Approved folder"))
+        if args.get("consent") is not True:
+            raise ValueError("Approving a new folder requires consent=true (CLI: --consent)")
+        added = self.file_service.add_root(path, args.get("label", Path(path).name or "Approved folder"), consent=args["consent"])
         self._wait_for_root(added["id"])
         return added["id"]
 
@@ -218,9 +240,9 @@ class JarvisCommandBridge:
             root_id = self._resolve_root(args)
             return self.file_service.generate_sort_plan(root_id, _require_bool(args.get("create_folders", False), "create_folders"))
         if command == "sort_apply":
-            return self.file_service.apply_sort_plan(args.get("plan_id"))
+            return self.file_service.apply_sort_plan(args.get("plan_id"), confirm=args.get("confirm"))
         if command == "sort_undo":
-            return self.file_service.undo_sort_plan(args.get("plan_id"))
+            return self.file_service.undo_sort_plan(args.get("plan_id"), confirm=args.get("confirm"))
         raise ValueError("Unknown Jarvis command")
 
 
@@ -237,7 +259,7 @@ class JarvisHttpClient:
             with urlopen(Request(self.base_url + "/", method="GET"), timeout=self.timeout) as response:
                 html = response.read(256 * 1024).decode("utf-8")
         except (OSError, ValueError, HTTPException) as error:
-            raise ValueError("Could not read the loopback dashboard; check the URL and that it is running") from error
+            raise ValueError("Could not read the loopback dashboard; check the URL and that it is running") from None
         match = re.search(r'<meta\s+name="csrf-token"\s+content="([^"]+)"', html)
         if not match:
             raise ValueError("Kshetrajna dashboard token was not found")
@@ -261,9 +283,9 @@ class JarvisHttpClient:
                     message = details["error"].replace(self.token, "[redacted]")
             except (OSError, ValueError, HTTPException):
                 pass
-            raise ValueError(message) from error
+            raise ValueError(message) from None
         except (OSError, ValueError, HTTPException) as error:
-            raise ValueError("Dashboard request failed; check that it is running and returning JSON") from error
+            raise ValueError("Dashboard request failed; check that it is running and returning JSON") from None
         if not isinstance(result, dict):
             raise ValueError("Dashboard returned an invalid JSON response")
         return result
@@ -280,13 +302,18 @@ class JarvisHttpClient:
                 raise ValueError("Known folder is unavailable; refresh discovery")
             args["path"] = match["path"]
         if args.get("path"):
+            path = _root_path_key(args["path"])
             roots = self._get("/api/files/state")["roots"]
-            path = str(Path(args["path"]).resolve(strict=False)).casefold()
-            existing = next((root for root in roots if str(Path(root["path"]).resolve(strict=False)).casefold() == path), None)
-            if existing:
-                return existing["id"]
+            for root in roots:
+                try:
+                    if root["status"] != "removed" and _root_path_key(root["path"]) == path:
+                        return root["id"]
+                except ValueError:
+                    continue
+            if args.get("consent") is not True:
+                raise ValueError("Approving a new folder requires consent=true (CLI: --consent)")
             added = self._post("/api/files/roots/add", {
-                "path": args["path"], "label": args.get("label", Path(args["path"]).name), "consent": True,
+                "path": args["path"], "label": args.get("label", Path(args["path"]).name), "consent": args["consent"],
             })
             root_id = added["id"]
             deadline = time.monotonic() + 60
@@ -355,9 +382,9 @@ class JarvisHttpClient:
             root_id = self._resolve_remote_root(args)
             return self._post("/api/files/sort/preview", {"root_id": root_id, "create_folders": _require_bool(args.get("create_folders", False), "create_folders")})
         if command == "sort_apply":
-            return self._post("/api/files/sort/apply", {"plan_id": args.get("plan_id")})
+            return self._post("/api/files/sort/apply", {"plan_id": args.get("plan_id"), "confirm": args.get("confirm")})
         if command == "sort_undo":
-            return self._post("/api/files/sort/undo", {"plan_id": args.get("plan_id")})
+            return self._post("/api/files/sort/undo", {"plan_id": args.get("plan_id"), "confirm": args.get("confirm")})
         raise ValueError("Unknown Jarvis command")
 
     def _post(self, path: str, body: dict) -> dict:
@@ -385,7 +412,7 @@ def serve_jsonl(bridge, input_stream=None, output_stream=None) -> int:
             except json.JSONDecodeError:
                 result = {"ok": False, "error": "Invalid JSON"}
             except (ValueError, TypeError, KeyError, OSError) as error:
-                result = {"ok": False, "error": str(error)}
+                result = {"ok": False, "error": public_error(error)}
         output_stream.write(json.dumps(result, separators=(",", ":")) + "\n")
         output_stream.flush()
     return 0
@@ -427,7 +454,7 @@ def main(argv=None, default_command=None) -> int:
                 "Cleanup deletion is reversible quarantine rather than immediate permanent removal and requires --file-id ID --confirm. "
                 "Use quarantine_list (or quarantine_preview) to review recovery records; "
                 "restore requires --action-id ID --confirm. "
-                "A preview with --path or --known-folder approves and scans that folder. "
+                "A new folder selected with --path or --known-folder requires --consent to approve and scan it. "
                 "With kshetrajna-sort (python -m kshetrajna.cli), use cleanup empty|duplicates "
                 "or quarantine list|preview|restore and sort preview|apply|undo; sort options alone default to sort_preview, "
                 "cleanup options alone to empty_preview. Use --jsonl explicitly for JSON-lines input."))
@@ -450,6 +477,7 @@ def main(argv=None, default_command=None) -> int:
     scope.add_argument("--path", help="Approve and scan a folder for a preview")
     scope.add_argument("--known-folder", help="Discovered folder ID to approve and scan")
     scope.add_argument("--root-id", type=_cli_positive_id, help="Positive approved root ID; omit for cleanup across approved roots")
+    parser.add_argument("--consent", action="store_true", help="Explicitly approve access to a new --path or --known-folder")
     parser.add_argument("--label")
     parser.add_argument("--query")
     parser.add_argument("--plan-id")
@@ -467,7 +495,7 @@ def main(argv=None, default_command=None) -> int:
     local_bridge = None
     try:
         payload = {key: value for key, value in vars(args).items()
-                   if key in {"path", "known_folder", "label", "root_id", "query", "plan_id", "file_id", "action_id", "create_folders", "confirm"}
+                   if key in {"path", "known_folder", "label", "root_id", "query", "plan_id", "file_id", "action_id", "create_folders", "confirm", "consent"}
                    and value is not None and value is not False}
         if not args.jsonl:
             JarvisCommandBridge._validate_args(args.command, payload)
@@ -481,7 +509,7 @@ def main(argv=None, default_command=None) -> int:
         print(json.dumps({"ok": True, "result": bridge.execute(args.command, **payload), "command": args.command}, indent=2))
         return 0
     except ValueError as error:
-        print(json.dumps({"ok": False, "error": str(error)}))
+        print(json.dumps({"ok": False, "error": public_error(error)}))
         return 2
     except (OSError, HTTPException, TypeError, KeyError):
         print(json.dumps({"ok": False, "error": "Command could not be completed; check the dashboard, paths, and permissions"}))

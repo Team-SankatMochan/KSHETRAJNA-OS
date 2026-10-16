@@ -10,10 +10,11 @@ from .storage import EventStore
 
 
 class Collector:
-    def __init__(self, probe, config: ConfigStore, store: EventStore):
+    def __init__(self, probe, config: ConfigStore, store: EventStore, *, demo=False):
         self.probe = probe
         self.config = config
         self.store = store
+        self.demo = demo
         self._gate = threading.RLock()
         self._wake = threading.Event()
         self._stop = threading.Event()
@@ -37,10 +38,18 @@ class Collector:
             self._thread.join(timeout=10)
 
     def update_settings(self, patch: dict) -> Settings:
+        if not isinstance(patch, dict):
+            raise ValueError("Settings update must be a JSON object")
         with self._gate:
             previous = self.config.load()
+            if (patch.get("enabled") is True and not self.demo and
+                    patch.get("device_consent", previous.device_consent) is not True):
+                raise ValueError("Device collection requires explicit device consent")
+            if not self.demo and patch.get("device_consent") is False:
+                patch = {**patch, "enabled": False}
             settings = self.config.update(patch)
-            if not settings.enabled or settings.track_processes != previous.track_processes or settings.track_foreground != previous.track_foreground:
+            if (not settings.enabled or (not self.demo and settings.device_consent is not True) or
+                    settings.track_processes != previous.track_processes or settings.track_foreground != previous.track_foreground):
                 self.probe.reset()
                 self._last_foreground = None
                 self._was_idle = None
@@ -52,7 +61,9 @@ class Collector:
             self._wake.set()
             return settings
 
-    def delete_history(self) -> None:
+    def delete_history(self, *, confirm=False) -> None:
+        if confirm is not True:
+            raise ValueError("Deleting recorded history requires confirm=true")
         with self._gate:
             self.store.clear()
             self.probe.reset()
@@ -63,7 +74,7 @@ class Collector:
     def collect_once(self) -> Snapshot | None:
         with self._gate:
             settings = self.config.load()
-            if not settings.enabled:
+            if not settings.enabled or (not self.demo and settings.device_consent is not True):
                 if self._active:
                     self.probe.reset()
                     self._last_foreground = None

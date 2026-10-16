@@ -36,7 +36,7 @@ class TestEmptyFileDetection(unittest.TestCase):
 
     def tearDown(self):
         self._resolve_quarantine()
-        self.service.delete_all()
+        self.service.delete_all(confirm=True)
 
     def _resolve_quarantine(self):
         for item in self.service.get_quarantine_items().copy():
@@ -58,7 +58,7 @@ class TestEmptyFileDetection(unittest.TestCase):
         (self.root_path / "empty.txt").write_bytes(b"")
         (self.root_path / "notempty.txt").write_bytes(b"hello")
 
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
 
         result = self.service.get_empty_files(root_id)
@@ -72,7 +72,7 @@ class TestEmptyFileDetection(unittest.TestCase):
         for protected in ("__init__.py", ".gitkeep", ".keep", "py.typed", "__init__.pyi"):
             (self.root_path / protected).write_bytes(b"")
 
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
 
         result = self.service.get_empty_files(root_id)
@@ -85,8 +85,8 @@ class TestEmptyFileDetection(unittest.TestCase):
         (self.root_path / "a.txt").write_bytes(b"")
         (root2 / "b.txt").write_bytes(b"")
 
-        r1 = self.service.add_root(str(self.root_path), "R1")["id"]
-        r2 = self.service.add_root(str(root2), "R2")["id"]
+        r1 = self.service.add_root(str(self.root_path), "R1", consent=True)["id"]
+        r2 = self.service.add_root(str(root2), "R2", consent=True)["id"]
         self._wait_scan(r1)
         self._wait_scan(r2)
 
@@ -98,7 +98,7 @@ class TestEmptyFileDetection(unittest.TestCase):
     def test_delete_empty_file_requires_confirm(self):
         """Calling without confirm=True must raise."""
         (self.root_path / "e.txt").write_bytes(b"")
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
         file_id = self.service.get_empty_files(root_id)["empty_files"][0]["id"]
         with self.assertRaisesRegex(ValueError, "confirm=true"):
@@ -108,7 +108,7 @@ class TestEmptyFileDetection(unittest.TestCase):
         """delete_empty_file removes the file and journals the action."""
         empty = self.root_path / "gone.txt"
         empty.write_bytes(b"")
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
         file_id = self.service.get_empty_files(root_id)["empty_files"][0]["id"]
 
@@ -126,7 +126,7 @@ class TestEmptyFileDetection(unittest.TestCase):
         """A file that grew between scan and delete must be rejected."""
         f = self.root_path / "surprise.txt"
         f.write_bytes(b"")
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
         file_id = self.service.get_empty_files(root_id)["empty_files"][0]["id"]
 
@@ -145,7 +145,7 @@ class TestEmptyFileDetection(unittest.TestCase):
         """Attempting to delete __init__.py (by file_id) should fail gracefully."""
         init = self.root_path / "__init__.py"
         init.write_bytes(b"")
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
 
         # Fetch the file_id directly from DB (it won't appear in get_empty_files)
@@ -162,7 +162,7 @@ class TestEmptyFileDetection(unittest.TestCase):
         names = (".env", "private.pem", "requirements.txt", "package.json", ".gitattributes")
         for name in names:
             (self.root_path / name).write_bytes(b"")
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
         result = self.service.get_empty_files(root_id)
         self.assertEqual(result["empty_files"], [])
@@ -180,7 +180,7 @@ class TestEmptyFileDetection(unittest.TestCase):
 
     def test_cleanup_rejects_unready_root_instead_of_using_stale_catalog(self):
         (self.root_path / "stale.txt").write_bytes(b"")
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
         self.store.update_root_status(root_id, "error", error="Root became unavailable")
         with self.assertRaisesRegex(ValueError, "not ready"):
@@ -191,7 +191,7 @@ class TestEmptyFileDetection(unittest.TestCase):
     def test_cleanup_excludes_catalog_rows_from_an_older_scan_pass(self):
         empty = self.root_path / "old-index.txt"
         empty.write_bytes(b"")
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
         with self.store._connect() as db:
             db.execute("UPDATE scan_state SET last_pass=last_pass+1 WHERE root_id=?", (root_id,))
@@ -200,13 +200,14 @@ class TestEmptyFileDetection(unittest.TestCase):
     def test_generic_delete_proposal_rejects_an_error_root(self):
         file_path = self.root_path / "protected-by-status.txt"
         file_path.write_text("content", encoding="utf-8")
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
         with self.store._connect() as db:
             file_id = db.execute(
                 "SELECT id FROM files WHERE root_id=? AND relative_path=?", (root_id, file_path.name)
             ).fetchone()[0]
         self.store.update_root_status(root_id, "error", error="unavailable")
+        self.service.config.update({"allow_permanent_delete": True})
         with self.assertRaisesRegex(ValueError, "ready or truncated"):
             self.service.create_proposal(file_id, "DELETE", file_path.name)
 
@@ -217,7 +218,7 @@ class TestEmptyFileDetection(unittest.TestCase):
         (project / "scratch.txt").write_bytes(b"")
         general = self.root_path / "general.txt"
         general.write_bytes(b"")
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
 
         names = {file["name"] for file in self.service.get_empty_files(root_id)["empty_files"]}
@@ -242,7 +243,7 @@ class TestEmptyFileDetection(unittest.TestCase):
             link.symlink_to(target)
         except OSError:
             self.skipTest("symlinks require platform permission")
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
         # The scanner correctly omits links; inject a stale catalog row to
         # prove the destructive endpoint still rejects one if it is present.
@@ -259,7 +260,7 @@ class TestEmptyFileDetection(unittest.TestCase):
 
     def test_local_bridge_exposes_reviewed_cleanup_commands(self):
         (self.root_path / "bridge-empty.txt").write_bytes(b"")
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
         bridge = JarvisCommandBridge(self.service)
 
@@ -284,7 +285,7 @@ class TestDuplicateFileDetection(unittest.TestCase):
 
     def tearDown(self):
         self._resolve_quarantine()
-        self.service.delete_all()
+        self.service.delete_all(confirm=True)
 
     def _resolve_quarantine(self):
         for item in self.service.get_quarantine_items().copy():
@@ -305,7 +306,7 @@ class TestDuplicateFileDetection(unittest.TestCase):
         """Unique files produce no duplicate groups."""
         (self.root_path / "a.txt").write_bytes(b"aaa")
         (self.root_path / "b.txt").write_bytes(b"bbb")
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
 
         result = self.service.get_duplicate_groups(root_id)
@@ -319,7 +320,7 @@ class TestDuplicateFileDetection(unittest.TestCase):
         (self.root_path / "copy1.txt").write_bytes(content)
         (self.root_path / "copy2.txt").write_bytes(content)
         (self.root_path / "unique.txt").write_bytes(b"different")
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
 
         result = self.service.get_duplicate_groups(root_id)
@@ -336,7 +337,7 @@ class TestDuplicateFileDetection(unittest.TestCase):
         content = b"sha256 verification payload"
         (self.root_path / "f1.dat").write_bytes(content)
         (self.root_path / "f2.dat").write_bytes(content)
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
 
         result = self.service.get_duplicate_groups(root_id)
@@ -351,7 +352,7 @@ class TestDuplicateFileDetection(unittest.TestCase):
         (self.root_path / "big2.bin").write_bytes(big)
         (self.root_path / "small1.bin").write_bytes(small)
         (self.root_path / "small2.bin").write_bytes(small)
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
 
         result = self.service.get_duplicate_groups(root_id)
@@ -373,7 +374,7 @@ class TestDuplicateFileDetection(unittest.TestCase):
         content = b"need confirm"
         (self.root_path / "d1.txt").write_bytes(content)
         (self.root_path / "d2.txt").write_bytes(content)
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
         file_id = self.service.get_duplicate_groups(root_id)["groups"][0]["files"][0]["id"]
         with self.assertRaisesRegex(ValueError, "confirm=true"):
@@ -386,7 +387,7 @@ class TestDuplicateFileDetection(unittest.TestCase):
         f2 = self.root_path / "twin2.txt"
         f1.write_bytes(content)
         f2.write_bytes(content)
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
 
         group = self.service.get_duplicate_groups(root_id)["groups"][0]
@@ -415,8 +416,8 @@ class TestDuplicateFileDetection(unittest.TestCase):
         payload = b"cross-root exact content"
         (self.root_path / "one.bin").write_bytes(payload)
         (other_root / "two.bin").write_bytes(payload)
-        first = self.service.add_root(str(self.root_path), "First")["id"]
-        second = self.service.add_root(str(other_root), "Second")["id"]
+        first = self.service.add_root(str(self.root_path), "First", consent=True)["id"]
+        second = self.service.add_root(str(other_root), "Second", consent=True)["id"]
         self._wait_scan(first)
         self._wait_scan(second)
         groups = self.service.get_duplicate_groups()
@@ -431,7 +432,7 @@ class TestDuplicateFileDetection(unittest.TestCase):
         (project / "copy-b.bin").write_bytes(b"project duplicate")
         (self.root_path / "general-a.bin").write_bytes(b"general duplicate")
         (self.root_path / "general-b.bin").write_bytes(b"general duplicate")
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
 
         groups = self.service.get_duplicate_groups(root_id)["groups"]
@@ -444,7 +445,7 @@ class TestDuplicateFileDetection(unittest.TestCase):
         second = self.root_path / "second.bin"
         first.write_bytes(payload)
         second.write_bytes(payload)
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
         group = self.service.get_duplicate_groups(root_id)["groups"][0]
         self.service.delete_duplicate_file(group["files"][0]["id"], confirm=True)
@@ -457,7 +458,7 @@ class TestDuplicateFileDetection(unittest.TestCase):
         second = self.root_path / "second.bin"
         first.write_bytes(b"same-size-a")
         second.write_bytes(b"same-size-a")
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
         victim_id = self.service.get_duplicate_groups(root_id)["groups"][0]["files"][0]["id"]
         first.write_bytes(b"different-x")  # same length, so size-only checks are insufficient
@@ -468,7 +469,7 @@ class TestDuplicateFileDetection(unittest.TestCase):
     def test_hash_budget_skips_large_duplicate_candidates(self):
         (self.root_path / "one.bin").write_bytes(b"12345")
         (self.root_path / "two.bin").write_bytes(b"12345")
-        root_id = self.service.add_root(str(self.root_path), "Root")["id"]
+        root_id = self.service.add_root(str(self.root_path), "Root", consent=True)["id"]
         self._wait_scan(root_id)
         with patch.object(FileService, "_MAX_HASH_BYTES", 4):
             result = self.service.get_duplicate_groups(root_id)
@@ -501,7 +502,7 @@ class TestCleanupHTTP(unittest.TestCase):
         (root / "one.txt").write_bytes(b"duplicate")
         (root / "two.txt").write_bytes(b"duplicate")
         self.files = FileService(FileStore(Path(self.temp.name) / "files.db"))
-        self.root_id = self.files.add_root(str(root), "Root")["id"]
+        self.root_id = self.files.add_root(str(root), "Root", consent=True)["id"]
         while self.files.store.get_root(self.root_id)["status"] == "scanning":
             time.sleep(0.01)
         config = ConfigStore(Path(self.temp.name))
@@ -522,7 +523,7 @@ class TestCleanupHTTP(unittest.TestCase):
                         self.files.restore_quarantined_file(item["action_id"], confirm=True)
                     except ValueError:
                         pass
-            self.files.delete_all()
+            self.files.delete_all(confirm=True)
 
     def call(self, path, body, *, token=True):
         with closing(http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)) as connection:

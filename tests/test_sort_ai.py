@@ -28,7 +28,7 @@ class SortAiTests(unittest.TestCase):
         (self.root_path / "notes.txt").write_text("meeting notes", encoding="utf-8")
         self.store = FileStore(Path(self.temp.name) / "files.db")
         self.service = FileService(self.store)
-        self.root_id = self.service.add_root(str(self.root_path), "Approved")["id"]
+        self.root_id = self.service.add_root(str(self.root_path), "Approved", consent=True)["id"]
         for _ in range(100):
             if self.store.get_root(self.root_id)["status"] != "scanning":
                 break
@@ -36,7 +36,7 @@ class SortAiTests(unittest.TestCase):
 
     def tearDown(self):
         if self.store.get_roots():
-            self.service.delete_all()
+            self.service.delete_all(confirm=True)
         self.temp.cleanup()
 
     def test_ready_scan_clears_active_scan_gate(self):
@@ -75,7 +75,7 @@ class SortAiTests(unittest.TestCase):
         for name in ('holiday (1).jpg', 'unknown.bin', 'untitled.txt', 'pending.crdownload'):
             self.assertEqual((self.root_path / name).read_bytes(), payloads[name])
         self.assertTrue((project / 'paper.pdf').exists())
-        self.assertEqual(self.service.undo_sort_plan(plan['id'])['status'], 'rolled_back')
+        self.assertEqual(self.service.undo_sort_plan(plan['id'], confirm=True)['status'], 'rolled_back')
         for name, data in payloads.items():
             self.assertEqual((self.root_path / name).read_bytes(), data)
         self.assertFalse((self.root_path / 'Pictures').exists())
@@ -88,7 +88,7 @@ class SortAiTests(unittest.TestCase):
         result = self.service.approve_sort_idea(plan['id'], suggestion_ids=[selected['id']], confirm=True)
         self.assertEqual(len(result['applied']), 1)
         self.assertTrue((self.root_path / 'second.txt').exists())
-        self.assertEqual(self.service.undo_sort_plan(plan['id'])['status'], 'rolled_back')
+        self.assertEqual(self.service.undo_sort_plan(plan['id'], confirm=True)['status'], 'rolled_back')
 
     def test_keep_decision_persists_until_the_indexed_file_changes(self):
         plan = self.service.generate_sort_plan(self.root_id, create_folders=True)
@@ -130,7 +130,7 @@ class SortAiTests(unittest.TestCase):
         self.assertEqual({s['source_relative'] for s in plan['suggestions']}, {'00.txt', '01.txt'})
         self.assertEqual(len(self.service.apply_confident_sort(plan['id'], confirm=True)['applied']), 2)
         self.assertTrue((self.root_path / 'main.py').exists())
-        self.assertEqual(self.service.undo_sort_plan(plan['id'])['status'], 'rolled_back')
+        self.assertEqual(self.service.undo_sort_plan(plan['id'], confirm=True)['status'], 'rolled_back')
 
     def test_worker_does_not_erase_immediately_requested_rescan(self):
         if self.service._scan_thread:
@@ -160,13 +160,13 @@ class SortAiTests(unittest.TestCase):
         plan = self.service.generate_sort_plan(self.root_id, create_folders=True)
         file = self.store.search_files('main.py')[0]
         action = self.service.create_proposal(file['id'], 'RENAME', 'changed.py')
-        self.service.apply_action(action['proposal_id'])
+        self.service.apply_action(action['proposal_id'], confirm=True)
         result = self.service.apply_confident_sort(plan['id'], confirm=True)
         failed = next(s for s in result['failed'] if 'source moved' in s['error'])
         self.assertIsNotNone(failed)
         self.assertTrue((self.root_path / 'changed.py').exists())
-        self.service.undo_sort_plan(plan['id'])
-        self.service.undo_action(action['id'])
+        self.service.undo_sort_plan(plan['id'], confirm=True)
+        self.service.undo_action(action['id'], confirm=True)
 
     def test_preview_edit_apply_and_reverse_batch(self):
         plan = self.service.generate_sort_plan(self.root_id, create_folders=True)
@@ -182,13 +182,13 @@ class SortAiTests(unittest.TestCase):
             "selected": False,
             "destination_relative": first["destination_relative"],
         }])
-        result = self.service.apply_sort_plan(plan["id"])
+        result = self.service.apply_sort_plan(plan["id"], confirm=True)
         self.assertEqual(result["status"], "applied")
         self.assertEqual(len(result["applied"]), 1)
         self.assertEqual(len(result["failed"]), 0)
         self.assertEqual(len(list(self.root_path.rglob("*.txt"))), 1)
 
-        undone = self.service.undo_sort_plan(plan["id"])
+        undone = self.service.undo_sort_plan(plan["id"], confirm=True)
         self.assertEqual(undone["status"], "rolled_back")
         self.assertTrue((self.root_path / "notes.txt").exists())
         self.assertFalse((self.root_path / "Documents").exists())
@@ -201,7 +201,7 @@ class SortAiTests(unittest.TestCase):
         self.assertTrue((self.root_path / "Code" / "main.py").exists())
         self.assertTrue((self.root_path / "notes.txt").exists())
         self.assertEqual(result["plan"]["suggestions"][0]["destination_folder"], code["destination_folder"])
-        self.assertEqual(self.service.undo_sort_plan(plan["id"])["status"], "rolled_back")
+        self.assertEqual(self.service.undo_sort_plan(plan["id"], confirm=True)["status"], "rolled_back")
         self.assertTrue((self.root_path / "main.py").exists())
         self.assertFalse((self.root_path / "Code").exists())
 
@@ -210,7 +210,7 @@ class SortAiTests(unittest.TestCase):
         result = self.service.organize_file(file_id, confirm=True)
         self.assertIn(result["status"], ("applied", "partial"))
         self.assertTrue((self.root_path / "Code" / "main.py").exists())
-        self.service.undo_sort_plan(result["plan"]["id"])
+        self.service.undo_sort_plan(result["plan"]["id"], confirm=True)
         self.assertTrue((self.root_path / "main.py").exists())
 
     def test_conflicts_are_visible_and_not_selected(self):
@@ -226,21 +226,21 @@ class SortAiTests(unittest.TestCase):
         file_id = self.store.search_files("main.py")[0]["id"]
         action = self.service.create_proposal(file_id, "RENAME", "renamed.py")
         with self.assertRaisesRegex(ValueError, "recovery records"):
-            self.service.delete_all()
+            self.service.delete_all(confirm=True)
         with self.assertRaisesRegex(ValueError, "recovery records"):
             self.service.remove_root(self.root_id)
         self.service.dismiss_proposal(action["proposal_id"])
-        self.service.delete_all()
+        self.service.delete_all(confirm=True)
         self.assertEqual(self.store.get_roots(), [])
 
     def test_demo_batch_never_creates_or_moves_fixture_files(self):
         demo_service = FileService(self.store, demo=True)
         plan = demo_service.generate_sort_plan(self.root_id, create_folders=True)
-        result = demo_service.apply_sort_plan(plan["id"])
+        result = demo_service.apply_sort_plan(plan["id"], confirm=True)
         self.assertEqual(result["status"], "applied")
         self.assertTrue((self.root_path / "main.py").exists())
         self.assertFalse((self.root_path / "Code").exists())
-        self.assertEqual(demo_service.undo_sort_plan(plan["id"])["status"], "rolled_back")
+        self.assertEqual(demo_service.undo_sort_plan(plan["id"], confirm=True)["status"], "rolled_back")
 
     def test_batch_reports_partial_completion_without_overwrite(self):
         plan = self.service.generate_sort_plan(self.root_id, create_folders=True)
@@ -248,11 +248,11 @@ class SortAiTests(unittest.TestCase):
                   "destination_relative": "Documents/same.txt"}
                  for suggestion in plan["suggestions"]]
         plan = self.service.update_sort_plan(plan["id"], edits)
-        result = self.service.apply_sort_plan(plan["id"])
+        result = self.service.apply_sort_plan(plan["id"], confirm=True)
         self.assertEqual(result["status"], "partial")
         self.assertEqual(len(result["applied"]), 1)
         self.assertEqual(len(result["failed"]), 1)
-        self.assertEqual(self.service.undo_sort_plan(plan["id"])["status"], "rolled_back")
+        self.assertEqual(self.service.undo_sort_plan(plan["id"], confirm=True)["status"], "rolled_back")
         self.assertTrue((self.root_path / "main.py").exists())
         self.assertTrue((self.root_path / "notes.txt").exists())
 
@@ -305,7 +305,7 @@ class SortAiHttpTests(unittest.TestCase):
         root.mkdir()
         (root / "sample.py").write_text("print('ok')", encoding="utf-8")
         self.files = FileService(FileStore(Path(self.temp.name) / "files.db"))
-        self.root_id = self.files.add_root(str(root), "Approved")["id"]
+        self.root_id = self.files.add_root(str(root), "Approved", consent=True)["id"]
         for _ in range(100):
             if self.files.store.get_root(self.root_id)["status"] != "scanning":
                 break
@@ -325,7 +325,7 @@ class SortAiHttpTests(unittest.TestCase):
         self.thread.join()
         self.server.server_close()
         if self.files.store.get_roots():
-            self.files.delete_all()
+            self.files.delete_all(confirm=True)
         self.temp.cleanup()
 
     def call(self, method, path, body=None):
@@ -357,7 +357,7 @@ class SortAiHttpTests(unittest.TestCase):
         status, result = self.call('POST', '/api/files/sort/auto', {'plan_id':plan['id'], 'confirm':True})
         self.assertEqual(status, 200)
         self.assertEqual(len(result['applied']), 1)
-        status, result = self.call('POST', '/api/files/sort/undo', {'plan_id':plan['id']})
+        status, result = self.call('POST', '/api/files/sort/undo', {'plan_id':plan['id'], 'confirm':True})
         self.assertEqual(status, 200)
         self.assertEqual(result['status'], 'rolled_back')
 
@@ -375,7 +375,7 @@ class SortAiHttpTests(unittest.TestCase):
         })
         self.assertEqual(status, 200, result)
         self.assertEqual(result["status"], "applied")
-        status, undone = self.call("POST", "/api/files/sort/undo", {"plan_id": plan["id"]})
+        status, undone = self.call("POST", "/api/files/sort/undo", {"plan_id": plan["id"], "confirm": True})
         self.assertEqual(status, 200, undone)
         self.assertEqual(undone["status"], "rolled_back")
 

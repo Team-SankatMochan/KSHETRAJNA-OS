@@ -69,6 +69,8 @@ class OllamaClient:
         return details
 
     def stream(self, model, messages, cancel, *, tool_callback=None):
+        if cancel.is_set():
+            return
         details = self.validate_model(model)
         if cancel.is_set():
             return
@@ -84,7 +86,10 @@ class OllamaClient:
                     "memory_review", "idle_review", "system_review", "temp_cleanup", "disk_cleanup", "store_cache", "sort_files"]}},
                     "required": ["intent"], "additionalProperties": False}}}]
         try:
-            connection.request("POST", "/api/chat", body=json.dumps(body).encode(),
+            payload = json.dumps(body).encode()
+            if cancel.is_set():
+                return
+            connection.request("POST", "/api/chat", body=payload,
                                headers={"Content-Type": "application/json"})
             response = connection.getresponse()
             if response.status != 200:

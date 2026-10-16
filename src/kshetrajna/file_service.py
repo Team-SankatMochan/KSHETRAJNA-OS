@@ -19,6 +19,7 @@ from .sort_ai import build_suggestions, automation_eligible
 from .organization import organization_plan, folder_inventory
 from .image_preview import IMAGE_EXTENSIONS, MAX_IMAGE_BYTES, inspect_image
 from .pdf_preview import PDF_EXTENSIONS, MAX_PDF_BYTES, inspect_pdf, extract_pdf_excerpt
+from .config import ConfigStore, opaque_id, public_error
 
 PROTECTED_PREFIXES = [
     os.environ.get('SystemRoot', r'C:\Windows').lower(),
@@ -33,13 +34,15 @@ PROTECTED_PREFIXES = [
 class FileService:
     _SCAN_STOP_TIMEOUT = 10
 
-    def __init__(self, store: FileStore, demo: bool = False):
+    def __init__(self, store: FileStore, demo: bool = False, *, config=None):
         self.store = store
+        self.config = config or ConfigStore(store.path.parent)
         self.demo = demo
         self.action_manager = FileActionManager(store)
         if not self.demo:
             self.action_manager.reconcile_actions()
         self._gate = threading.RLock()
+        self._permanent_delete_consents = {}
         self._scan_done = threading.Condition(self._gate)
         self._catalog_deleting = False
         self._scan_thread: threading.Thread | None = None
@@ -87,13 +90,17 @@ class FileService:
         except ValueError:
             return False
 
-    def _validate_root_path(self, path_str: str, *, batch=False) -> Path:
-        if not isinstance(path_str, str) or not path_str or len(path_str) < 3 or '\0' in path_str:
+    @staticmethod
+    def _validate_root_form(path_str: str) -> bool:
+        """Reject prohibited forms without resolving, statting or opening a path."""
+        if (not isinstance(path_str, str) or not 3 <= len(path_str) <= 32767 or
+                any(ord(c) < 32 for c in path_str)):
             raise ValueError("Invalid path format")
 
-        if path_str.startswith((r'\\', "//")):
+        slashed = path_str.replace('\\', '/')
+        if path_str.startswith('\\') or slashed.startswith('//'):
             raise ValueError("Network and UNC paths are not supported")
-        if any(part in (".", "..") for part in path_str.replace('\\', '/').split('/')):
+        if any(part in (".", "..") for part in slashed.split('/')):
             raise ValueError("Path traversal is not allowed")
 
         # Keep validation deterministic when the API is exercised on a
@@ -101,8 +108,12 @@ class FileService:
         # relative POSIX name there, which otherwise hides the more useful
         # drive/protected-path error and makes cross-platform tests brittle.
         has_windows_drive = len(path_str) >= 2 and path_str[0].isalpha() and path_str[1] == ':'
+        if ':' in (path_str[2:] if has_windows_drive else path_str):
+            raise ValueError("Only local folder paths are supported")
         if has_windows_drive:
             windows_path = PureWindowsPath(path_str)
+            if not windows_path.is_absolute():
+                raise ValueError("Use an absolute local folder path")
             windows_normalized = str(windows_path).replace('/', '\\').rstrip('\\').lower()
             if len(windows_path.parts) == 1:
                 raise ValueError("Root drives cannot be scanned directly")
@@ -113,8 +124,17 @@ class FileService:
             if any(windows_normalized == protected or windows_normalized.startswith(protected + '\\')
                    for protected in windows_protected):
                 raise ValueError("System and protected paths cannot be scanned")
-            if os.name != 'nt':
-                raise ValueError("Windows paths can only be scanned on Windows")
+        lexical = str(PureWindowsPath(path_str)) if has_windows_drive else os.path.abspath(path_str)
+        lexical = lexical.replace('/', '\\').casefold().rstrip('\\')
+        for protected in PROTECTED_PREFIXES:
+            protected = protected.replace('/', '\\').casefold().rstrip('\\')
+            if lexical == protected or lexical.startswith(protected + '\\'):
+                raise ValueError("System and protected paths cannot be scanned")
+        return has_windows_drive
+
+    def _validate_root_path(self, path_str: str, *, batch=False) -> Path:
+        if self._validate_root_form(path_str) and os.name != 'nt':
+            raise ValueError("Windows paths can only be scanned on Windows")
 
         lexical_path = Path(path_str)
         # Check the path as supplied before resolve(): resolve() follows a link,
@@ -176,7 +196,9 @@ class FileService:
 
         return path
 
-    def add_root(self, path_str: str, label: str) -> dict:
+    def add_root(self, path_str: str, label: str, *, consent=False) -> dict:
+        if consent is not True:
+            raise ValueError("Folder access requires explicit consent=true")
         if self.demo:
             raise ValueError("Roots cannot be added in demo mode")
             
@@ -204,7 +226,7 @@ class FileService:
                     self.rescan_root(root_id)
                     results.append(self.store.get_root(root_id))
                 except (ValueError, OSError) as error:
-                    skipped.append({'path': item.get('path'), 'reason': str(error)})
+                    skipped.append({'path': item.get('path'), 'reason': public_error(error)})
         return {'approved': results, 'skipped': skipped}
 
     def get_organization(self) -> dict:
@@ -410,9 +432,9 @@ class FileService:
                     messages.append(f"{scan_notes[key]} {description}")
             note = 'Skipped ' + ', '.join(messages) + '.' if messages else None
             
-        except Exception as e:
-            logging.getLogger(__name__).exception("Scan failed")
-            status, note = "error", str(e)
+        except Exception:
+            logging.getLogger(__name__).error("Scan failed; approved folder may be unavailable")
+            status, note = "error", "Scan could not complete; check folder access and retry"
         finally:
             self._finish_scan(root_id, status, error=note, file_count=count, total_size=total_size)
 
@@ -477,7 +499,9 @@ class FileService:
             if root_id not in self._active_scans:
                 self.store.remove_root(root_id)
 
-    def delete_all(self) -> None:
+    def delete_all(self, *, confirm=False) -> None:
+        if confirm is not True:
+            raise ValueError("Deleting file intelligence data requires confirm=true")
         with self._gate:
             self._assert_catalog_available()
             self._catalog_deleting = True
@@ -550,8 +574,7 @@ class FileService:
         return result
 
     def _sort_plan(self, plan_id: str) -> dict:
-        if not isinstance(plan_id, str) or not plan_id or len(plan_id) > 100:
-            raise ValueError("Invalid sort plan")
+        opaque_id(plan_id, "sort plan")
         plan = self.store.get_sort_plan(plan_id)
         if not plan:
             raise ValueError("Sort plan not found")
@@ -709,7 +732,7 @@ class FileService:
             self._clear_sort_selection(plan_id)
             patches = [{"id": s["id"], "selected": True} for s in selected[:500]]
             self.update_sort_plan(plan_id, patches)
-            return self.apply_sort_plan(plan_id, keep_pending=True)
+            return self.apply_sort_plan(plan_id, keep_pending=True, confirm=True)
 
     def _clear_sort_selection(self, plan_id):
         with self.store._connect() as db:
@@ -819,7 +842,9 @@ class FileService:
                 # the user; cleanup never removes user-created content.
                 continue
 
-    def apply_sort_plan(self, plan_id: str, *, keep_pending=False) -> dict:
+    def apply_sort_plan(self, plan_id: str, *, keep_pending=False, confirm=False) -> dict:
+        if confirm is not True:
+            raise ValueError("Applying a sort plan requires confirm=true")
         with self._gate:
             plan = self._sort_plan(plan_id)
             if plan["status"] not in ("preview", "partial"):
@@ -851,8 +876,8 @@ class FileService:
                 else:
                     self._prepare_sort_directories(plan, selected, root_path)
             except Exception as error:
-                self.store.update_sort_plan(plan_id, {"status": "failed", "error": str(error)})
-                raise
+                self.store.update_sort_plan(plan_id, {"status": "failed", "error": public_error(error)})
+                raise ValueError(public_error(error)) from None
 
             applied = []
             failed = []
@@ -868,7 +893,7 @@ class FileService:
                         destination_root_id=suggestion.get('destination_root_id') or plan['root_id'],
                     )
                     self.store.update_sort_suggestion(suggestion["id"], {"status": "applying", "action_id": action["id"], "error": None})
-                    result = self.action_manager.apply_action(action["proposal_id"])
+                    result = self.apply_action(action["proposal_id"], confirm=True)
                     if result.get("status") != "applied":
                         raise ValueError(result.get("message", "File action did not complete"))
                     self.store.update_sort_suggestion(suggestion["id"], {"status": "applied", "error": None})
@@ -879,11 +904,11 @@ class FileService:
                         try:
                             act = self.store.get_file_action(action_id)
                             if act and act.get("status") == 'proposed':
-                                self.store.update_file_action(action_id, {"status": "failed", "error": str(error)})
+                                self.store.update_file_action(action_id, {"status": "failed", "error": public_error(error)})
                         except Exception:
                             pass
-                    self.store.update_sort_suggestion(suggestion["id"], {"status": "failed", "error": str(error)})
-                    failed.append({"suggestion_id": suggestion["id"], "status": "failed", "error": str(error)})
+                    self.store.update_sort_suggestion(suggestion["id"], {"status": "failed", "error": public_error(error)})
+                    failed.append({"suggestion_id": suggestion["id"], "status": "failed", "error": public_error(error)})
 
             remaining = self._sort_plan(plan_id)["suggestions"]
             has_applied = any(s["status"] == "applied" for s in remaining)
@@ -895,7 +920,9 @@ class FileService:
             return {"plan": self._sort_plan_view(self._sort_plan(plan_id)), "status": status,
                     "applied": applied, "failed": failed}
 
-    def undo_sort_plan(self, plan_id: str) -> dict:
+    def undo_sort_plan(self, plan_id: str, *, confirm=False) -> dict:
+        if confirm is not True:
+            raise ValueError("Undoing a sort plan requires confirm=true")
         with self._gate:
             plan = self._sort_plan(plan_id)
             if plan["status"] not in ("applied", "partial", "undo_partial"):
@@ -909,14 +936,14 @@ class FileService:
                 if suggestion["status"] not in ("applied", "undo_failed") or not suggestion.get("action_id"):
                     continue
                 try:
-                    result = self.action_manager.undo_action(suggestion["action_id"])
+                    result = self.undo_action(suggestion["action_id"], confirm=True)
                     if result.get("status") != "rolled_back":
                         raise ValueError(result.get("message", "Undo did not complete"))
                     self.store.update_sort_suggestion(suggestion["id"], {"status": "rolled_back", "error": None})
                     rolled_back.append(suggestion["id"])
                 except (OSError, ValueError, TypeError) as error:
-                    self.store.update_sort_suggestion(suggestion["id"], {"status": "undo_failed", "error": str(error)})
-                    failed.append({"suggestion_id": suggestion["id"], "status": "undo_failed", "error": str(error)})
+                    self.store.update_sort_suggestion(suggestion["id"], {"status": "undo_failed", "error": public_error(error)})
+                    failed.append({"suggestion_id": suggestion["id"], "status": "undo_failed", "error": public_error(error)})
             status = "rolled_back" if not failed else "undo_partial"
             self.store.update_sort_plan(plan_id, {"status": status, "error": None if not failed else "Some file actions need manual recovery"})
             cleanup_root = Path(root["path"]).resolve(strict=True) if not self.demo else Path(root["path"])
@@ -940,7 +967,7 @@ class FileService:
                 if action and action["status"] == "applied":
                     self.store.update_sort_suggestion(suggestion["id"], {"status": "applied", "error": None})
                 elif action:
-                    self.store.update_sort_suggestion(suggestion["id"], {"status": "failed", "error": action.get("error") or action["status"]})
+                    self.store.update_sort_suggestion(suggestion["id"], {"status": "failed", "error": "Interrupted action needs review"})
             refreshed = self.store.get_sort_plan(summary["id"])
             statuses = [s["status"] for s in refreshed["suggestions"]]
             if statuses and all(status == "applied" for status in statuses if status not in ("blocked", "unselected")):
@@ -1155,39 +1182,76 @@ class FileService:
                 raise ValueError("Wait for the current scan to finish before changing files.")
 
     def create_proposal(self, file_id: int, kind: str, destination_relative: str, destination_root_id=None) -> dict:
-        file_id = self._positive_id(file_id, "file_id")
-        mode = "demo" if self.demo else "live"
-        file_row = self.store.get_file(file_id)
-        if file_row:
-            self._assert_no_scan(file_row["root_id"])
-        if destination_root_id is not None:
-            destination_root_id = self._positive_id(destination_root_id, 'destination_root_id')
-            self._assert_no_scan(destination_root_id)
-        return self.action_manager.create_proposal(file_id, kind, destination_relative, mode, destination_root_id=destination_root_id)
+        with self._gate, self.config._lock:
+            if kind == "DELETE":
+                self._require_permanent_delete()
+                version = self.config.consent_version("allow_permanent_delete")
+            file_id = self._positive_id(file_id, "file_id")
+            mode = "demo" if self.demo else "live"
+            file_row = self.store.get_file(file_id)
+            if file_row:
+                self._assert_no_scan(file_row["root_id"])
+            if destination_root_id is not None:
+                destination_root_id = self._positive_id(destination_root_id, 'destination_root_id')
+                self._assert_no_scan(destination_root_id)
+            action = self.action_manager.create_proposal(file_id, kind, destination_relative, mode, destination_root_id=destination_root_id)
+            if kind == "DELETE":
+                now = datetime.now(timezone.utc)
+                self._permanent_delete_consents = {key: value for key, value in self._permanent_delete_consents.items()
+                                                  if value[1] > now}
+                # Pending irreversible work needs fresh review after a service restart.
+                self._permanent_delete_consents[action["proposal_id"]] = (version, datetime.fromisoformat(action["expires_at"]))
+            return action
 
     def apply_action(self, proposal_id: str, *, confirm=False) -> dict:
-        action = self.store.get_file_action(proposal_id=proposal_id)
-        if action:
-            if action.get("kind") == "DELETE" and confirm is not True:
-                raise ValueError("Deleting a file requires confirm=true")
-            self._assert_no_scan(action["root_id"])
-            self._assert_no_scan(action.get('destination_root_id') or action['root_id'])
-        with self._gate:
-            return self.action_manager.apply_action(proposal_id)
+        if confirm is not True:
+            raise ValueError("Applying a file action requires confirm=true")
+        opaque_id(proposal_id, "proposal_id")
+        with self._gate, self.config._lock:
+            action = self.store.get_file_action(proposal_id=proposal_id)
+            if action:
+                if action.get("kind") == "DELETE" and not action.get("quarantine_requested"):
+                    self._require_permanent_delete()
+                    binding = self._permanent_delete_consents.pop(proposal_id, None)
+                    if not binding or binding[0] != self.config.consent_version("allow_permanent_delete"):
+                        if action["status"] == "proposed":
+                            self.store.update_file_action(action["id"], {"status": "expired"})
+                        raise ValueError("Permanent-delete consent changed or binding is unavailable; request a fresh review")
+                self._assert_no_scan(action["root_id"])
+                self._assert_no_scan(action.get('destination_root_id') or action['root_id'])
+            try:
+                result = self.action_manager.apply_action(proposal_id)
+            except (OSError, ValueError) as error:
+                raise ValueError(public_error(error)) from None
+            if result.get("status") not in ("applied", "deleted", "quarantined"):
+                result["message"] = "File action could not complete; review its recovery record"
+            return result
 
-    def undo_action(self, action_id: str) -> dict:
-        action = self.store.get_file_action(action_id=action_id)
-        if action:
-            self._assert_no_scan(action["root_id"])
-            self._assert_no_scan(action.get('destination_root_id') or action['root_id'])
+    def _require_permanent_delete(self):
+        if self.config.load().allow_permanent_delete is not True:
+            raise ValueError("Enable the separate permanent-delete danger capability before permanent deletion")
+
+    def undo_action(self, action_id: str, *, confirm=False) -> dict:
+        if confirm is not True:
+            raise ValueError("Undoing a file action requires confirm=true")
+        opaque_id(action_id)
         with self._gate:
-            return self.action_manager.undo_action(action_id)
+            action = self.store.get_file_action(action_id=action_id)
+            if action:
+                self._assert_no_scan(action["root_id"])
+                self._assert_no_scan(action.get('destination_root_id') or action['root_id'])
+            try:
+                return self.action_manager.undo_action(action_id)
+            except (OSError, ValueError) as error:
+                raise ValueError(public_error(error)) from None
 
     def dismiss_proposal(self, proposal_id: str) -> None:
+        opaque_id(proposal_id, "proposal_id")
         self.action_manager.dismiss_proposal(proposal_id)
 
     def get_action_journal(self) -> list[dict]:
-        return self.action_manager.get_journal()
+        return [{**row, "error": "File action needs review; check the current target and permissions" if row.get("error") else None}
+                for row in self.action_manager.get_journal()]
 
     def get_quarantine_items(self, root_id=None) -> list[dict]:
         """Return restore metadata without exposing file contents or root paths."""
@@ -1229,10 +1293,7 @@ class FileService:
             return items
 
     def restore_quarantined_file(self, action_id: str, *, confirm=False) -> dict:
-        if (not isinstance(action_id, str) or not action_id or len(action_id) > 200
-                or not action_id.isascii()
-                or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for character in action_id)):
-            raise ValueError("Invalid action_id")
+        opaque_id(action_id)
         if confirm is not True:
             raise ValueError("Restoring a quarantined file requires confirm=true")
         if self.demo:
@@ -1242,7 +1303,10 @@ class FileService:
             raise ValueError("Quarantine action not found")
         with self._gate:
             self._assert_no_scan(action["root_id"])
-            return self.action_manager.restore_quarantined_file(action_id, confirm=True)
+            try:
+                return self.action_manager.restore_quarantined_file(action_id, confirm=True)
+            except (OSError, ValueError) as error:
+                raise ValueError(public_error(error)) from None
 
 
     # --- Empty-file operations ---
@@ -1434,7 +1498,7 @@ class FileService:
                 file_id, "DELETE", file["relative_path"], "live", expected_sha256=digest,
                 quarantine=True,
             )
-            result = self.action_manager.apply_action(action["proposal_id"])
+            result = self.apply_action(action["proposal_id"], confirm=True)
             return {
                 "deleted": result.get("status") in ("applied", "deleted", "quarantined"),
                 "quarantined": result.get("status") == "quarantined",
@@ -1629,7 +1693,7 @@ class FileService:
                 expected_sha256=digest, expected_peer_ids=peer_ids,
                 quarantine=True,
             )
-            result = self.action_manager.apply_action(action["proposal_id"])
+            result = self.apply_action(action["proposal_id"], confirm=True)
             return {
                 "deleted": result.get("status") in ("applied", "deleted", "quarantined"),
                 "quarantined": result.get("status") == "quarantined",

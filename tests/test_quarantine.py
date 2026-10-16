@@ -57,7 +57,7 @@ class QuarantineFixture(unittest.TestCase):
                 path.write_bytes(content)
             else:
                 path.write_text(content, encoding="utf-8")
-        root_id = self.service.add_root(str(self.root_path), label)["id"]
+        root_id = self.service.add_root(str(self.root_path), label, consent=True)["id"]
         self._wait_scan(root_id)
         return root_id
 
@@ -501,7 +501,7 @@ class QuarantineFixture(unittest.TestCase):
         with patch.object(os, "link", side_effect=OSError(errno.EXDEV, "different filesystem")), \
                 patch.object(self.service.action_manager, "_set_copy_timestamps",
                              side_effect=OSError(errno.EACCES, "timestamp refused")):
-            with self.assertRaisesRegex(ValueError, "timestamp refused"):
+            with self.assertRaisesRegex(ValueError, "Operation unavailable"):
                 self.service.delete_empty_file(file_id, confirm=True)
 
         self.assertEqual((self.root_path / "fallback.txt").read_bytes(), b"")
@@ -658,7 +658,7 @@ class QuarantineFixture(unittest.TestCase):
             self.service.remove_root(root_id)
         self.assertEqual(self.store.get_root(root_id)["status"], "ready")
         with self.assertRaisesRegex(ValueError, "Resolve file action"):
-            self.service.delete_all()
+            self.service.delete_all(confirm=True)
         self.assertIsNotNone(self.store.get_root(root_id))
         self.assertTrue(self._quarantine_path(action_id).exists())
 
@@ -713,7 +713,7 @@ class QuarantineFixture(unittest.TestCase):
         restarted_store = FileStore(self.db_path)
         restarted = FileService(restarted_store)
 
-        restarted.delete_all()
+        restarted.delete_all(confirm=True)
 
         self.assertEqual(restarted_store.get_roots(), [])
         self.assertIsNone(restarted_store.get_file_action(action_id=action_id))
@@ -737,7 +737,7 @@ class QuarantineFixture(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Resolve file action"):
             restarted.remove_root(root_id)
         with self.assertRaisesRegex(ValueError, "Resolve file action"):
-            restarted.delete_all()
+            restarted.delete_all(confirm=True)
         with self.assertRaises(ValueError):
             restarted.restore_quarantined_file(action_id, confirm=True)
         self.assertEqual(original.read_bytes(), b"modified payload")
@@ -759,7 +759,7 @@ class QuarantineFixture(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Resolve file action"):
             restarted.remove_root(root_id)
         with self.assertRaisesRegex(ValueError, "Resolve file action"):
-            restarted.delete_all()
+            restarted.delete_all(confirm=True)
         self.assertEqual((self.root_path / "original.bin").read_bytes(), b"original payload")
         self.assertIsNotNone(restarted_store.get_file(file_id))
 
@@ -781,7 +781,7 @@ class QuarantineFixture(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Resolve file action"):
             restarted.remove_root(root_id)
         with self.assertRaisesRegex(ValueError, "Resolve file action"):
-            restarted.delete_all()
+            restarted.delete_all(confirm=True)
         self.assertEqual(original.read_bytes(), b"original payload")
         self.assertIsNotNone(restarted_store.get_file(file_id))
 
@@ -805,7 +805,7 @@ class QuarantineFixture(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "Resolve file action"):
                     restarted.remove_root(root_id)
                 with self.assertRaisesRegex(ValueError, "Resolve file action"):
-                    restarted.delete_all()
+                    restarted.delete_all(confirm=True)
                 self.assertEqual((self.root_path / "original.bin").read_bytes(), b"original payload")
                 self.assertIsNotNone(restarted_store.get_file(file_id))
 
@@ -1061,7 +1061,7 @@ class QuarantineFixture(unittest.TestCase):
 
         with patch.object(self.service.action_manager, "_unlink_verified",
                           side_effect=PermissionError(errno.EACCES, "transient unlink failure")):
-            with self.assertRaisesRegex(ValueError, "transient unlink failure"):
+            with self.assertRaisesRegex(ValueError, "Operation unavailable"):
                 self.service.restore_quarantined_file(action_id, confirm=True)
         self.assertFalse(original.exists())
         self.assertEqual(quarantine.read_bytes(), b"original payload")
@@ -1092,7 +1092,7 @@ class QuarantineFixture(unittest.TestCase):
             raise PermissionError(errno.EACCES, "unlink refused after tamper")
 
         with patch.object(self.service.action_manager, "_unlink_verified", side_effect=tamper_then_fail):
-            with self.assertRaisesRegex(ValueError, "unlink refused after tamper"):
+            with self.assertRaisesRegex(ValueError, "Operation unavailable"):
                 self.service.restore_quarantined_file(action_id, confirm=True)
 
         self.assertFalse(original.exists())

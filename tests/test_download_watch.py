@@ -15,7 +15,7 @@ class DownloadWatchTests(unittest.TestCase):
         self.path.mkdir()
         self.store = FileStore(Path(self.temp.name) / 'files.db')
         self.service = FileService(self.store)
-        self.root_id = self.service.add_root(str(self.path), 'Downloads')['id']
+        self.root_id = self.service.add_root(str(self.path), 'Downloads', consent=True)['id']
         self.wait()
         self.service.set_folder_watch(self.root_id, True)
         self.watcher = DownloadWatcher(self.service, settle_seconds=4)

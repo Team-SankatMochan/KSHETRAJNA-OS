@@ -197,7 +197,7 @@ function renderDecisions(state) {
       const countdown = element('p', decision.error || 'Restoration due in ' + remaining + 's.', 'control-note');
       if (!decision.error) countdown.dataset.expires = decision.expires_at;
       item.append(countdown);
-      item.append(button('Undo now', () => mutate('/api/actions/undo', { id: decision.id }, 'Trial restoration completed.'), 'primary'));
+      item.append(button('Undo now', () => mutate('/api/actions/undo', { id: decision.id, confirm: true }, 'Trial restoration completed.'), 'primary'));
     } else if (decision.evaluation) {
       const evaluation = decision.evaluation;
       item.append(element('p', evaluation.conclusion, 'control-note'));
@@ -217,7 +217,7 @@ document.addEventListener('kshetrajna-state', event => renderIntelligence(event.
 $('confirm-trial').addEventListener('click', async () => {
   if (!pendingProposal) return;
   $('confirm-trial').disabled = true;
-  const result = await mutate('/api/actions/approve', { id: pendingProposal.id }, 'Trial approved. Undo is available in the journal.');
+  const result = await mutate('/api/actions/approve', { id: pendingProposal.id, confirm: true }, 'Trial approved. Undo is available in the journal.');
   $('confirm-trial').disabled = false;
   if (result) $('approval-dialog').close();
 });

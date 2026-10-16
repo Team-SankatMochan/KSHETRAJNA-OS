@@ -1,6 +1,7 @@
 """Fixed Windows maintenance actions, reviewed individually; no shell executor."""
 
 import ctypes
+import copy
 import os
 import subprocess
 import tempfile
@@ -13,6 +14,7 @@ from pathlib import Path
 from .actions import WindowsPriorityDriver
 from .intelligence import PRIORITY_ALLOWLIST
 from .telemetry import PROCESS_MEMORY_COUNTERS, _bind
+from .config import TELEMETRY_PERMISSIONS, opaque_id
 
 
 TOOLS = {
@@ -145,7 +147,7 @@ class WindowsMaintenanceDriver:
                 path.unlink()
                 deleted.append({"name": path.name, "size_bytes": info.st_size})
             except (OSError, ValueError) as error:
-                skipped.append({"name": path.name, "reason": str(error)})
+                skipped.append({"name": path.name, "reason": "File unavailable or access denied" if isinstance(error, OSError) else str(error)})
         return {"status": "completed", "deleted": deleted, "skipped": skipped,
                 "message": f"Deleted {len(deleted)} reviewed temporary files; skipped {len(skipped)}."}
 
@@ -186,7 +188,7 @@ class MaintenanceService:
         offers = [{"id": key, "action": key, **value} for key, value in TOOLS.items()]
         latest = self.store.latest()
         settings = self.config.load()
-        if (latest and settings.enabled and settings.track_processes and settings.track_foreground and
+        if (latest and settings.enabled and (self.demo or settings.device_consent is True) and settings.track_processes and settings.track_foreground and
                 0 <= self.clock() - datetime.fromisoformat(latest["observed_at"]).timestamp() <= 30):
             for target in latest["processes"]:
                 if (target["name"].casefold() in PRIORITY_ALLOWLIST and target.get("created_ticks") and
@@ -203,7 +205,7 @@ class MaintenanceService:
             raise ValueError("Enable Windows maintenance in Privacy controls before reviewing an action")
 
     def preview(self, action_id):
-        with self.collector._gate:
+        with self.collector._gate, self.config._lock:
             self._gate()
             offer = next((o for o in self.offers() if o["id"] == action_id), None)
             if not offer:
@@ -213,6 +215,9 @@ class MaintenanceService:
             if len(self.plans) >= 20:
                 raise ValueError("Too many open previews; wait one minute")
             plan = {**offer, "id": uuid.uuid4().hex, "offer_id": action_id, "expires_at": now + 60}
+            plan["consent_version"] = self.config.consent_version("allow_maintenance")
+            if offer["action"] == "trim_memory":
+                plan["telemetry_versions"] = self.config.consent_versions(*TELEMETRY_PERMISSIONS)
             if offer["action"] == "temp_cleanup":
                 candidates = [] if self.demo else inspect_temp_files()
                 plan["candidates"] = candidates
@@ -220,16 +225,22 @@ class MaintenanceService:
                                   f"({sum(item['size_bytes'] for item in candidates) / 1024**2:.1f} MiB). "
                                   "Recent, protected, sensitive, changed, and locked files are skipped.")
             self.plans[plan["id"]] = plan
-            return dict(plan)
+            return copy.deepcopy(plan)
 
-    def execute(self, plan_id):
-        if not isinstance(plan_id, str):
-            raise ValueError("Invalid approval")
-        with self.collector._gate:
+    def execute(self, plan_id, *, confirm=False):
+        if confirm is not True:
+            raise ValueError("Maintenance requires confirm=true")
+        opaque_id(plan_id, "plan_id")
+        with self.collector._gate, self.config._lock:
             self._gate()
             plan = self.plans.pop(plan_id, None)
             if not plan or plan["expires_at"] <= self.clock():
                 raise ValueError("Preview expired or already used; review again")
+            if plan["consent_version"] != self.config.consent_version("allow_maintenance"):
+                raise ValueError("Maintenance consent changed; review again")
+            if (plan["action"] == "trim_memory" and
+                    plan["telemetry_versions"] != self.config.consent_versions(*TELEMETRY_PERMISSIONS)):
+                raise ValueError("Telemetry consent changed; review again")
             if not any(o["id"] == plan["offer_id"] for o in self.offers()):
                 raise ValueError("The target changed or became foreground; review again")
             if self.store.pending_decisions():

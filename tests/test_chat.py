@@ -41,7 +41,7 @@ class ChatTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.config = ConfigStore(Path(self.temp.name))
-        self.config.update({"enabled": True, "track_foreground": True})
+        self.config.update({"device_consent": True, "enabled": True, "track_foreground": True})
         self.store = EventStore(Path(self.temp.name) / "events.db")
         self.collector = Collector(DemoProbe(), self.config, self.store)
         self.service = AssistantService(self.collector, self.config, self.store, demo=False)

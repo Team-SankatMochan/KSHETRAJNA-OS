@@ -10,6 +10,7 @@ from importlib.resources import files
 from urllib.parse import urlsplit
 from .service import AssistantService
 from .chat import ChatAssistant
+from .config import public_error
 
 
 class DashboardServer(ThreadingHTTPServer):
@@ -17,6 +18,7 @@ class DashboardServer(ThreadingHTTPServer):
 
     def __init__(self, port: int, collector, config, store, *, demo=False):
         self.collector = collector
+        collector.demo = demo
         self.config = config
         self.store = store
         self.token = secrets.token_urlsafe(32)
@@ -275,7 +277,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     service.tick()
                 self._json(200, {"settings": asdict(result)})
             elif path == "/api/delete":
-                service.delete_history()
+                service.delete_history(confirm=body.get("confirm"))
                 self.server.chat.clear()
                 self._json(200, {"deleted": True})
             elif path == "/api/chat/status":
@@ -291,7 +293,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             elif path == "/api/chat/unload":
                 if body.get("confirm") is not True:
                     raise ValueError("Explicit confirmation is required")
-                self._json(200, self.server.chat.unload_model(body.get("model")))
+                self._json(200, self.server.chat.unload_model(body.get("model"), confirm=body.get("confirm")))
             elif path == "/api/processes/preview":
                 self._json(200, {"plan": self.server.chat.processes.preview(body.get("pid"), body.get("action"))})
             elif path == "/api/processes/execute":
@@ -304,13 +306,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._json(200, {"plan": service.maintenance.preview(body.get("id"))})
             elif path == "/api/maintenance/execute":
                 self.server.chat.validate_session(body.get("session_id"))
-                decision = service.maintenance.execute(body.get("id"))
+                decision = service.maintenance.execute(body.get("id"), confirm=body.get("confirm"))
                 self.server.chat.record_outcome(body.get("session_id"), decision)
                 self._json(200, {"decision": decision})
             elif path == "/api/actions/approve":
-                self._json(200, {"decision": service.approve(body.get("id"))})
+                self._json(200, {"decision": service.approve(body.get("id"), confirm=body.get("confirm"))})
             elif path == "/api/actions/undo":
-                self._json(200, {"decision": service.undo(body.get("id"))})
+                self._json(200, {"decision": service.undo(body.get("id"), confirm=body.get("confirm"))})
             elif path == "/api/actions/dismiss":
                 service.dismiss(body.get("id"))
                 self._json(200, {"dismissed": True})
@@ -344,7 +346,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             elif path == "/api/files/roots/add" and self.server.file_service:
                 if body.get("consent") is not True:
                     raise ValueError("Folder access requires explicit consent")
-                self._json(200, self.server.file_service.add_root(body.get("path"), body.get("label", "")))
+                self._json(200, self.server.file_service.add_root(body.get("path"), body.get("label", ""), consent=body.get("consent")))
             elif path == '/api/files/roots/watch' and self.server.file_service:
                 self._json(200, self.server.file_service.set_folder_watch(body.get('root_id'), body.get('enabled')))
             elif path == "/api/files/roots/rescan" and self.server.file_service:
@@ -359,7 +361,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             elif path == "/api/files/delete-all" and self.server.file_service:
                 if body.get("confirm") is not True:
                     raise ValueError("Deleting file intelligence data requires confirm=true")
-                self.server.file_service.delete_all()
+                self.server.file_service.delete_all(confirm=body.get("confirm"))
                 self._json(200, {"deleted": True})
             elif path == "/api/files/actions/propose" and self.server.file_service:
                 if body.get("kind") == "DELETE" and body.get("confirm") is not True:
@@ -370,7 +372,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 result = self.server.file_service.apply_action(body.get("proposal_id"), confirm=body.get("confirm"))
                 self._json(200 if result.get("status") in ("applied", "deleted") else 409, result)
             elif path == "/api/files/actions/undo" and self.server.file_service:
-                result = self.server.file_service.undo_action(body.get("action_id"))
+                result = self.server.file_service.undo_action(body.get("action_id"), confirm=body.get("confirm"))
                 self._json(200 if result.get("status") == "rolled_back" else 409, result)
             elif path == "/api/files/actions/dismiss" and self.server.file_service:
                 self.server.file_service.dismiss_proposal(body.get("proposal_id"))
@@ -388,7 +390,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._json(200, self.server.file_service.update_sort_plan(
                     body.get("plan_id"), body.get("suggestions")))
             elif path == "/api/files/sort/apply" and self.server.file_service:
-                result = self.server.file_service.apply_sort_plan(body.get("plan_id"))
+                result = self.server.file_service.apply_sort_plan(body.get("plan_id"), confirm=body.get("confirm"))
                 self._json(200 if result.get("status") in ("applied", "partial") else 409, result)
             elif path == '/api/files/sort/auto' and self.server.file_service:
                 result = self.server.file_service.apply_confident_sort(body.get('plan_id'), confirm=body.get('confirm'))
@@ -401,7 +403,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     suggestion_id=body.get("suggestion_id"), suggestion_ids=body.get('suggestion_ids'), confirm=body.get("confirm"))
                 self._json(200 if result.get("status") in ("applied", "partial") else 409, result)
             elif path == "/api/files/sort/undo" and self.server.file_service:
-                result = self.server.file_service.undo_sort_plan(body.get("plan_id"))
+                result = self.server.file_service.undo_sort_plan(body.get("plan_id"), confirm=body.get("confirm"))
                 self._json(200 if result.get("status") == "rolled_back" else 409, result)
             elif path == "/api/files/empty/delete" and self.server.file_service:
                 result = self.server.file_service.delete_empty_file(
@@ -418,6 +420,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
             else:
                 self._json(404, {"error": "Not found"})
         except (ValueError, TypeError) as error:
-            self._json(400, {"error": str(error)})
+            self._json(400, {"error": public_error(error)})
         except OSError:
             self._json(409, {"error": "Windows could not complete this operation. The target may have exited or denied access."})

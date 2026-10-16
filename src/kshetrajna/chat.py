@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from .local_ai import OllamaClient, LocalAIError
 from .process_control import ProcessControlService
+from .config import TELEMETRY_PERMISSIONS, public_error
 
 
 SYSTEM_PROMPT = """You are Kshetrajna, a local Windows assistant. Answer naturally and concisely.
@@ -57,6 +58,26 @@ def identify_intent(message):
     return "conversation"
 
 
+class _GenerationConsent(threading.Event):
+    """Revoked jobs stay revoked when the capability is enabled again."""
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.versions = config.consent_versions("allow_local_ai", *TELEMETRY_PERMISSIONS)
+
+    def is_set(self):
+        if super().is_set():
+            return True
+        try:
+            with self.config._lock:
+                if (not self.config.load().allow_local_ai or self.versions !=
+                        self.config.consent_versions("allow_local_ai", *TELEMETRY_PERMISSIONS)):
+                    self.set()
+        except (OSError, ValueError):
+            self.set()
+        return super().is_set()
+
+
 class ChatAssistant:
     def __init__(self, service, *, client=None, process_driver=None):
         self.service = service
@@ -88,7 +109,7 @@ class ChatAssistant:
 
     def _tools(self, message, *, intent_override=None):
         intent, settings = intent_override or identify_intent(message), self.config.load()
-        latest = self.store.latest() if settings.enabled else None
+        latest = self.store.latest() if settings.enabled and (self.service.demo or settings.device_consent is True) else None
         fresh = latest and 0 <= self.clock() - datetime.fromisoformat(latest["observed_at"]).timestamp() <= 30
         actions, summary = [], ""
         snapshot = None
@@ -155,7 +176,7 @@ class ChatAssistant:
         if session_id is not None and (not isinstance(session_id, str) or len(session_id) > 100):
             raise ValueError("Invalid conversation")
         message = message.strip()
-        with self._lock:
+        with self._lock, self.config._lock:
             now = self.clock()
             for old_id in list(self.sessions):
                 if now - self.sessions[old_id]["updated"] > 1800:
@@ -169,6 +190,7 @@ class ChatAssistant:
                 self.sessions[session_id] = {"messages": [], "updated": now}
             if any(j["session_id"] == session_id and j["status"] == "generating" for j in self.jobs.values()):
                 raise ValueError("Stop or finish the current response first")
+            cancel = _GenerationConsent(self.config)
             tools = self._tools(message)
             for old_id in list(self.jobs):
                 if self.jobs[old_id]["status"] != "generating" and now - self.jobs[old_id]["created"] > 300:
@@ -178,9 +200,13 @@ class ChatAssistant:
             job_id = secrets.token_urlsafe(24)
             job = {"id": job_id, "session_id": session_id, "created": now, "status": "generating",
                    "reply": tools["summary"], "actions": tools["actions"], "tools": tools,
-                   "provider": "local tools", "error": None, "cancel": threading.Event()}
+                   "provider": "local tools", "error": None, "cancel": cancel}
             self.jobs[job_id] = job
             session = self.sessions[session_id]
+            context_versions = dict(cancel.versions)
+            if session.get("context_versions") != context_versions:
+                session["messages"].clear()
+                session["context_versions"] = context_versions
             session["messages"].append({"role": "user", "content": message})
             session["messages"] = session["messages"][-16:]
             session["updated"] = now
@@ -203,12 +229,17 @@ class ChatAssistant:
                 job.update(status="failed", error="The local model is busy with another conversation. Try again shortly.")
             return
         try:
+            if job["cancel"].is_set():
+                with self._lock:
+                    job["status"] = "cancelled"
+                return
             status = self.status(force=True)
             model = status["selected_model"]
             if not status["available"] or not model:
                 raise LocalAIError(status["error"] or "No local model is installed. Install one in Ollama, then refresh models.")
             with self._lock:
                 if job["session_id"] not in self.sessions or job["cancel"].is_set():
+                    job["status"] = "cancelled"
                     return
                 history = list(self.sessions[job["session_id"]]["messages"])
                 job["provider"] = f"Ollama / {model}"
@@ -227,6 +258,10 @@ class ChatAssistant:
                 planned.append((call, result))
                 with self._lock:
                     job["tools"], job["actions"] = result, result["actions"]
+            if job["cancel"].is_set():
+                with self._lock:
+                    job["status"] = "cancelled"
+                return
             streams = self.client.stream(model, messages, job["cancel"], tool_callback=review_tool) if (
                 job["tools"]["intent"] == "conversation" and getattr(self.client, "tool_planning", False)) else self.client.stream(model, messages, job["cancel"])
             reply = ""
@@ -244,6 +279,10 @@ class ChatAssistant:
                 messages.append({"role": "assistant", "content": reply, "tool_calls": [planned[0][0]]})
                 messages.append({"role": "tool", "tool_name": "review_pc", "content": json.dumps(planned[0][1])})
                 reply = ""
+                if job["cancel"].is_set():
+                    with self._lock:
+                        job["status"] = "cancelled"
+                    return
                 for fragment in self.client.stream(model, messages, job["cancel"]):
                     if not self.config.load().allow_local_ai:
                         job["cancel"].set()
@@ -264,7 +303,7 @@ class ChatAssistant:
         except (LocalAIError, OSError, ValueError, TypeError) as error:
             with self._lock:
                 job.update(status="cancelled" if job["cancel"].is_set() else "failed",
-                           error=None if job["cancel"].is_set() else str(error))
+                           error=None if job["cancel"].is_set() else public_error(error))
                 if not job["reply"]:
                     job["reply"] = "The local model is unavailable. Check Ollama and your installed model."
         finally:
@@ -305,7 +344,9 @@ class ChatAssistant:
                 self.sessions.pop(session_id, None)
             return {"cleared": True}
 
-    def unload_model(self, model):
+    def unload_model(self, model, *, confirm=False):
+        if confirm is not True:
+            raise ValueError("Unloading a model requires confirm=true")
         if not self.config.load().allow_local_ai:
             raise ValueError("Local AI is disabled")
         if not isinstance(model, str):
@@ -329,6 +370,8 @@ class ChatAssistant:
         with self._lock:
             session = self.sessions.get(session_id)
             if session is not None:
+                if session.get("context_versions") != self.config.consent_versions("allow_local_ai", *TELEMETRY_PERMISSIONS):
+                    return
                 outcome = {k: decision.get(k) for k in ("title", "status", "result", "undo")}
                 session["messages"].append({"role": "assistant", "content": "Verified tool outcome: " + json.dumps(outcome)})
                 session["messages"] = session["messages"][-16:]

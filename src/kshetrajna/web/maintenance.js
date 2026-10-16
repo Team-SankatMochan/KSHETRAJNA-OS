@@ -49,7 +49,7 @@ $('maintenance-confirm').addEventListener('click', async () => {
   if (!maintenancePlan) return;
   $('maintenance-confirm').disabled = true;
   try {
-    const result = await post('/api/maintenance/execute', {id: maintenancePlan.id});
+    const result = await post('/api/maintenance/execute', {id: maintenancePlan.id, confirm: true});
     maintenancePlan = null;
     $('maintenance-dialog').close();
     await refresh();

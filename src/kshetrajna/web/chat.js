@@ -213,7 +213,7 @@ $('chat-action-confirm').addEventListener('click', async () => {
   try {
     const result = chatPlan.type === 'process'
       ? await post('/api/processes/execute', {id: chatPlan.plan.id, confirm: true, typed_name: $('chat-action-name').value, session_id: chatSession})
-      : await post('/api/maintenance/execute', {id: chatPlan.plan.id, session_id: chatSession});
+      : await post('/api/maintenance/execute', {id: chatPlan.plan.id, session_id: chatSession, confirm: true});
     chatMessage('assistant', `${result.decision.title}\n${result.decision.result.message}\n${result.decision.undo || ''}`);
     chatPlan = null; $('chat-action-dialog').close(); await refresh();
   } catch (error) { $('chat-action-error').textContent = error.message; }

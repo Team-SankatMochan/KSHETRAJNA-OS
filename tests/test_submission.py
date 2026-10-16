@@ -46,7 +46,7 @@ class SubmissionTests(unittest.TestCase):
         self.store = EventStore(Path(self.temp.name) / "events.db")
         self.probe = DemoProbe()
         seed_demo(self.store, self.probe)
-        self.collector = Collector(self.probe, self.config, self.store)
+        self.collector = Collector(self.probe, self.config, self.store, demo=True)
         self.collector.collect_once()
         self.driver = RecordingDriver(self.store)
         self.service = AssistantService(self.collector, self.config, self.store, demo=True, driver=self.driver)
@@ -90,41 +90,42 @@ class SubmissionTests(unittest.TestCase):
 
     def test_live_opt_in_and_pause_both_gate_approval(self):
         self.service.demo = False
+        self.config.update({"device_consent": True})
         with self.assertRaisesRegex(ValueError, "Enable live"):
-            self.service.approve(self.proposal_id())
+            self.service.approve(self.proposal_id(), confirm=True)
         self.config.update({"allow_priority_changes": True, "enabled": False})
         with self.assertRaisesRegex(ValueError, "Enable collection"):
-            self.service.approve(self.proposal_id())
+            self.service.approve(self.proposal_id(), confirm=True)
         self.assertEqual(self.driver.applied, 0)
 
     def test_journal_before_apply_manual_undo_and_evaluation(self):
-        decision = self.service.approve(self.proposal_id())
+        decision = self.service.approve(self.proposal_id(), confirm=True)
         self.assertEqual(self.driver.applied, 1)
         self.assertEqual(decision["status"], "active")
         for i in range(4):
             self.store.record(self.probe.sample(at=datetime.now(timezone.utc) + timedelta(seconds=i + 1)), [])
-        restored = self.service.undo(decision["id"])
+        restored = self.service.undo(decision["id"], confirm=True)
         self.assertEqual(restored["status"], "rolled_back")
         self.assertEqual(restored["evaluation"]["samples_after"], 4)
         self.assertIn("other workload", restored["evaluation"]["conclusion"])
         self.assertEqual(self.driver.restored, 1)
 
     def test_one_trial_and_fresh_sample_required(self):
-        self.service.approve(self.proposal_id())
+        self.service.approve(self.proposal_id(), confirm=True)
         with self.assertRaisesRegex(ValueError, "active trial"):
-            self.service.approve(self.proposal_id())
+            self.service.approve(self.proposal_id(), confirm=True)
         self.service.restore_all()
         self.service._clock = lambda: datetime.now(timezone.utc).timestamp() + 120
         with self.assertRaisesRegex(ValueError, "stale"):
-            self.service.approve(self.proposal_id())
+            self.service.approve(self.proposal_id(), confirm=True)
 
     def test_expiry_and_restart_recover_from_durable_journal(self):
-        decision = self.service.approve(self.proposal_id())
+        decision = self.service.approve(self.proposal_id(), confirm=True)
         self.service._clock = lambda: decision["expires_at"] + 1
         self.service.tick()
         self.assertFalse(self.store.pending_decisions())
         self.service._clock = lambda: datetime.now(timezone.utc).timestamp()
-        self.service.approve(self.proposal_id())
+        self.service.approve(self.proposal_id(), confirm=True)
         restarted = AssistantService(self.collector, self.config, self.store, demo=True, driver=self.driver)
         restarted.restore_all()
         self.assertFalse(self.store.pending_decisions())
@@ -132,7 +133,7 @@ class SubmissionTests(unittest.TestCase):
 
     def test_pause_restores_and_feedback_suppresses(self):
         proposal_id = self.proposal_id()
-        decision = self.service.approve(proposal_id)
+        decision = self.service.approve(proposal_id, confirm=True)
         self.collector.update_settings({"enabled": False})
         self.service.tick()
         self.assertFalse(self.store.pending_decisions())
@@ -140,15 +141,15 @@ class SubmissionTests(unittest.TestCase):
         self.assertNotIn(proposal_id, [p["id"] for p in self.service.state()["recommendations"]])
 
     def test_delete_restores_and_failed_restore_keeps_recovery_record(self):
-        decision = self.service.approve(self.proposal_id())
+        decision = self.service.approve(self.proposal_id(), confirm=True)
         self.driver.fail_restore = True
         with self.assertLogs("kshetrajna.service", level="ERROR"):
             with self.assertRaisesRegex(ValueError, "recovery record"):
-                self.service.delete_history()
+                self.service.delete_history(confirm=True)
         self.assertEqual(self.store.pending_decisions()[0]["status"], "restore_failed")
         self.assertIsNotNone(self.store.latest())
         self.driver.fail_restore = False
-        self.service.delete_history()
+        self.service.delete_history(confirm=True)
         self.assertIsNone(self.store.latest())
         self.assertFalse(self.store.decisions())
 
@@ -246,11 +247,11 @@ class SubmissionTests(unittest.TestCase):
         self.assertEqual(call("POST", "/api/actions/approve", {}, origin="https://evil.example")[0], 403)
         self.assertEqual(call("POST", "/api/settings", [], token="invalid")[0], 403)
         self.assertEqual(call("POST", "/api/settings", [])[0], 400)
-        status, body, _ = call("POST", "/api/actions/approve", {"id": self.proposal_id()})
+        status, body, _ = call("POST", "/api/actions/approve", {"id": self.proposal_id(), "confirm": True})
         self.assertEqual(status, 200, body)
         decision = json.loads(body)["decision"]
         self.assertEqual(decision["mode"], "demo")
-        self.assertEqual(call("POST", "/api/actions/undo", {"id": decision["id"]})[0], 200)
+        self.assertEqual(call("POST", "/api/actions/undo", {"id": decision["id"], "confirm": True})[0], 200)
         status, body, _ = call("GET", "/api/report")
         self.assertEqual(status, 200)
         report = json.loads(body)

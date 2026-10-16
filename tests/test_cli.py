@@ -40,6 +40,14 @@ def run_main(arguments, *, wrapper=False, stdin=""):
 
 
 class CliParserTests(unittest.TestCase):
+    def test_explicit_root_consent_flag_is_forwarded_by_cli_aliases(self):
+        bridge = Mock()
+        bridge.execute.return_value = {}
+        with patch.object(jarvis, "_build_local_bridge", return_value=(bridge, None)):
+            status, output, errors = run_main(["sort", "--path", "reviewed-folder", "--consent"], wrapper=True)
+        self.assertEqual(status, 0, output + errors)
+        bridge.execute.assert_called_once_with("sort_preview", path="reviewed-folder", consent=True)
+
     def test_help_and_bare_invocations_do_not_initialize_a_bridge(self):
         with patch.object(jarvis, "_build_local_bridge") as local, patch.object(
                 jarvis, "JarvisHttpClient") as remote:
@@ -338,7 +346,7 @@ class CliLocalServiceTests(unittest.TestCase):
         (self.root / ".env").write_text("PRIVATE_TEST_VALUE=not-for-output", encoding="utf-8")
         self.files = FileService(FileStore(self.data / "files.db"))
         self.addCleanup(self._clear_service)
-        self.root_id = self.files.add_root(str(self.root), "Approved")['id']
+        self.root_id = self.files.add_root(str(self.root), "Approved", consent=True)['id']
         deadline = time.monotonic() + 5
         while self.files.store.get_root(self.root_id)["status"] in ("pending", "scanning"):
             self.assertLess(time.monotonic(), deadline, "Temporary scan did not finish")
@@ -354,7 +362,7 @@ class CliLocalServiceTests(unittest.TestCase):
                         self.files.restore_quarantined_file(item["action_id"], confirm=True)
                     except ValueError:
                         pass
-            self.files.delete_all()
+            self.files.delete_all(confirm=True)
 
     def invoke(self, arguments, *, url=None, wrapper=False, stdin=""):
         target = ["--url", url] if url else ["--data-dir", str(self.data)]

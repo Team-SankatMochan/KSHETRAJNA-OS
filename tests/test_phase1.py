@@ -71,7 +71,7 @@ class PhaseOneTests(unittest.TestCase):
         self.assertTrue(reloaded.load().device_consent)
 
     def test_collection_activity_retention_and_delete(self):
-        self.collector.update_settings({"enabled": True})
+        self.collector.update_settings({"device_consent": True, "enabled": True})
         self.collector.collect_once()
         self.assertEqual(self.store.latest()["foreground_app"], "editor.exe")
         self.assertEqual(self.store.latest()["processes"][0]["pid"], 42)
@@ -84,7 +84,7 @@ class PhaseOneTests(unittest.TestCase):
         self.collector.update_settings({"enabled": False})
         self.assertIsNone(self.collector.collect_once())
         self.assertEqual(self.probe.calls, 2)
-        self.collector.delete_history()
+        self.collector.delete_history(confirm=True)
         self.assertIsNone(self.store.latest())
         self.assertEqual(self.store.activity(), [])
 
@@ -113,13 +113,13 @@ class PhaseOneTests(unittest.TestCase):
         response = connection.getresponse()
         self.assertEqual(response.status, 200)
         self.assertFalse(json.loads(response.read())["settings"]["enabled"])
-        connection.request("POST", "/api/settings", json.dumps({"enabled": True}),
+        connection.request("POST", "/api/settings", json.dumps({"device_consent": True, "enabled": True}),
                            {"Origin": f"http://127.0.0.1:{port}", "Content-Type": "application/json"})
         response = connection.getresponse()
         self.assertEqual(response.status, 403)
         response.read()
         self.assertFalse(self.config.load().enabled)
-        connection.request("POST", "/api/settings", json.dumps({"enabled": True}),
+        connection.request("POST", "/api/settings", json.dumps({"device_consent": True, "enabled": True}),
                            {"Origin": f"http://127.0.0.1:{port}",
                             "X-Kshetrajna-Token": server.token, "Content-Type": "application/json"})
         response = connection.getresponse()

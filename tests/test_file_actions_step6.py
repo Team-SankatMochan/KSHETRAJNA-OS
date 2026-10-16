@@ -46,11 +46,11 @@ class TestFileActionsStep6(unittest.TestCase):
         self.assertEqual(action2["status"], "proposed")
         
         # apply
-        self.service.apply_action(action2["proposal_id"])
+        self.service.apply_action(action2["proposal_id"], confirm=True)
         self.assertEqual(self.service.get_action_journal()[0]["status"], "applied")
         
         # undo
-        self.service.undo_action(action2["id"])
+        self.service.undo_action(action2["id"], confirm=True)
         self.assertEqual(self.service.get_action_journal()[0]["status"], "rolled_back")
 
     def test_demo_mode_simulation(self):
@@ -58,11 +58,11 @@ class TestFileActionsStep6(unittest.TestCase):
         action = demo_service.create_proposal(1, "RENAME", "doc2.txt")
         self.assertEqual(action["mode"], "demo")
         
-        res = demo_service.apply_action(action["proposal_id"])
+        res = demo_service.apply_action(action["proposal_id"], confirm=True)
         self.assertEqual(res["status"], "applied")
         self.assertTrue(self.doc_path.exists()) # Not actually moved
         
-        undo_res = demo_service.undo_action(action["id"])
+        undo_res = demo_service.undo_action(action["id"], confirm=True)
         self.assertEqual(undo_res["status"], "rolled_back")
 
 if __name__ == "__main__":

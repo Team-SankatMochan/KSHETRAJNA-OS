@@ -27,35 +27,35 @@ class TestFileStorageAndScanner(unittest.TestCase):
         self.service = FileService(self.store)
 
     def tearDown(self):
-        self.service.delete_all()
+        self.service.delete_all(confirm=True)
         
     def test_escape_like(self):
         self.assertEqual(escape_like("test_file%"), "test\\_file\\%")
 
     def test_root_normalization_and_validation(self):
         with self.assertRaisesRegex(ValueError, "Network and UNC paths"):
-            self.service.add_root(r"\\server\share", "Net")
+            self.service.add_root(r"\\server\share", "Net", consent=True)
 
         with self.assertRaisesRegex(ValueError, "Root drives cannot be scanned"):
-            self.service.add_root("C:\\", "Drive")
+            self.service.add_root("C:\\", "Drive", consent=True)
 
         with self.assertRaisesRegex(ValueError, "System and protected paths"):
-            self.service.add_root("C:\\Windows", "Windows")
+            self.service.add_root("C:\\Windows", "Windows", consent=True)
 
         p = Path(self.temp.name) / "root1"
         p.mkdir()
-        r1 = self.service.add_root(str(p), "R1")["id"]
+        r1 = self.service.add_root(str(p), "R1", consent=True)["id"]
         
         with self.assertRaisesRegex(ValueError, "Root already exists"):
-            self.service.add_root(str(p), "Dup")
+            self.service.add_root(str(p), "Dup", consent=True)
 
         p2 = p / "sub"
         p2.mkdir()
         with self.assertRaisesRegex(ValueError, "descendant of existing root"):
-            self.service.add_root(str(p2), "Desc")
+            self.service.add_root(str(p2), "Desc", consent=True)
 
         with self.assertRaisesRegex(ValueError, "ancestor of existing root"):
-            self.service.add_root(str(Path(self.temp.name)), "Anc")
+            self.service.add_root(str(Path(self.temp.name)), "Anc", consent=True)
 
     def test_scanner_skips_reparse_points(self):
         if os.name != 'nt':
@@ -72,7 +72,7 @@ class TestFileStorageAndScanner(unittest.TestCase):
         except OSError:
             self.skipTest("Requires Developer Mode or Admin for symlinks")
             
-        root_id = self.service.add_root(str(p), "Root")["id"]
+        root_id = self.service.add_root(str(p), "Root", consent=True)["id"]
         self.wait_scan(root_id)
         
         root = self.service.store.get_root(root_id)
@@ -151,7 +151,7 @@ class TestFileStorageAndScanner(unittest.TestCase):
         (p / "dsa.exe").write_bytes(b"MZ" + b"\0" * 100)
         (p / "metrics.csv").write_text("name,status\napi,ok\n", encoding="utf-8")
 
-        root_id = self.service.add_root(str(p), "Root")["id"]
+        root_id = self.service.add_root(str(p), "Root", consent=True)["id"]
         self.wait_scan(root_id)
         candidates = self.service.get_insights()["review_candidates"]
         names = {candidate["name"] for candidate in candidates}
@@ -169,7 +169,7 @@ class TestFileStorageAndScanner(unittest.TestCase):
                 "<w:document><w:body><w:p><w:r><w:t>Deep learning course plan</w:t></w:r></w:p></w:body></w:document>",
             )
 
-        root_id = self.service.add_root(str(p), "Root")["id"]
+        root_id = self.service.add_root(str(p), "Root", consent=True)["id"]
         self.wait_scan(root_id)
         file_id = self.service.store.get_recent_files(root_id, 10)[0]["id"]
         preview = self.service.get_file_excerpt(file_id)
@@ -187,7 +187,7 @@ class TestFileStorageAndScanner(unittest.TestCase):
         git.mkdir()
         (git / "config").write_text("gitconfig")
 
-        root_id = self.service.add_root(str(p), "Root")["id"]
+        root_id = self.service.add_root(str(p), "Root", consent=True)["id"]
         self.wait_scan(root_id)
 
         files = self.service.store.get_recent_files(root_id, 10)
@@ -201,7 +201,7 @@ class TestFileStorageAndScanner(unittest.TestCase):
         f1 = p / "f1.txt"
         f1.write_text("1")
         
-        root_id = self.service.add_root(str(p), "Root")["id"]
+        root_id = self.service.add_root(str(p), "Root", consent=True)["id"]
         self.wait_scan(root_id)
         
         with self.service.store._connect() as db:
@@ -236,7 +236,7 @@ class TestFileStorageAndScanner(unittest.TestCase):
         p.mkdir()
         (p / "target_100%.txt").write_text("hello _world")
         
-        root_id = self.service.add_root(str(p), "Root")["id"]
+        root_id = self.service.add_root(str(p), "Root", consent=True)["id"]
         self.wait_scan(root_id)
 
         result = self.service.search("target_100%").get("results")
@@ -267,7 +267,7 @@ class TestFileStorageAndScanner(unittest.TestCase):
         p = Path(self.temp.name) / "root"
         p.mkdir()
         (p / "f.txt").write_text("1")
-        root_id = self.service.add_root(str(p), "R")["id"]
+        root_id = self.service.add_root(str(p), "R", consent=True)["id"]
         self.wait_scan(root_id)
         self.assertEqual(self.service.store.get_stats()["total_files"], 1)
         
@@ -278,7 +278,7 @@ class TestFileStorageAndScanner(unittest.TestCase):
     def test_demo_mode_does_not_touch_fs(self):
         service = FileService(self.store, demo=True)
         with self.assertRaisesRegex(ValueError, "Roots cannot be added"):
-            service.add_root("C:\\Fake", "Fake")
+            service.add_root("C:\\Fake", "Fake", consent=True)
         
         from kshetrajna.file_demo import seed_file_demo
         seed_file_demo(self.store)
@@ -319,20 +319,20 @@ class TestFileHTTP(unittest.TestCase):
 
     def tearDown(self):
         self.server.server_close()
-        self.file_service.delete_all()
+        self.file_service.delete_all(confirm=True)
         
     def test_database_isolation(self):
         from kshetrajna.demo import seed_demo
         seed_demo(self.store, self.probe)
         
-        self.file_service.delete_all()
+        self.file_service.delete_all(confirm=True)
         self.assertEqual(len(self.file_store.get_roots()), 0)
         self.assertIsNotNone(self.store.latest()) # demo seed populates this
         
         from kshetrajna.file_demo import seed_file_demo
         seed_file_demo(self.file_store)
         
-        self.collector.delete_history()
+        self.collector.delete_history(confirm=True)
         self.assertIsNone(self.store.latest())
         self.assertEqual(len(self.file_store.get_roots()), 2)
 

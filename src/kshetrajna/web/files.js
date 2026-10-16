@@ -711,7 +711,7 @@ async function undoSortPlan() {
   sortBusy = true;
   filesRevision += 1;
   try {
-    const result = await post('/api/files/sort/undo', { plan_id: currentSortPlan.id });
+    const result = await post('/api/files/sort/undo', { plan_id: currentSortPlan.id, confirm: true });
     currentSortPlan = result.plan;
     renderSortPlan(currentSortPlan);
     $('sort-feedback').textContent = `Sort AI undo: ${result.rolled_back.length} restored, ${result.failed.length} need review.`;
@@ -1176,7 +1176,7 @@ async function proposeFileAction(file, kind) {
     }
     const result = await post('/api/files/actions/apply', {
       proposal_id: proposal.proposal_id,
-      ...(kind === 'DELETE' ? {confirm: true} : {}),
+      confirm: true,
     });
     if (result.status !== (kind === 'DELETE' ? 'deleted' : 'applied')) throw new Error(result.message || 'The file action did not complete.');
     setFeedback(kind === 'DELETE' ? 'File deleted permanently and recorded.' : `${kind === 'RENAME' ? 'Rename' : 'Move'} applied and recorded.`);
@@ -1209,7 +1209,7 @@ function renderActionJournal(actions) {
           try {
             const result = await post('/api/files/actions/apply', {
               proposal_id: action.proposal_id,
-              ...(action.kind === 'DELETE' ? {confirm: true} : {}),
+              confirm: true,
             });
             const expected = action.kind === 'DELETE' ? 'deleted' : 'applied';
             if (result.status !== expected) throw new Error(result.message || 'The file action did not complete.');
@@ -1227,7 +1227,7 @@ function renderActionJournal(actions) {
     } else if (action.status === 'applied') {
       controls.append(button('Undo', async () => {
         try {
-          const result = await post('/api/files/actions/undo', { action_id: action.id });
+          const result = await post('/api/files/actions/undo', { action_id: action.id, confirm: true });
           if (result.status !== 'rolled_back') throw new Error(result.message || 'The file action could not be undone.');
           setFeedback('File action undone when file state allowed it.');
           await refreshFiles();
