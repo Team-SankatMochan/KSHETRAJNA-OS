@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="csrf-token" content="__CSRF_TOKEN__">
-  <title>Kshetrajna · Adaptive Workload Intelligence</title>
+  <title>System Health · Kshetrajna</title>
   <link rel="stylesheet" href="/app.css">
   <link rel="stylesheet" href="/intelligence.css">
   <script src="/app.js" defer></script>
@@ -17,34 +17,35 @@
   <link rel="stylesheet" href="/workspace.css">
   <script src="/workspace.js" defer></script>
 </head>
-<body>
+<body data-ui-mode="basic">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
   <div class="shell">
     <aside class="sidebar" aria-label="App navigation">
       <a class="sidebar-brand" href="#overview"><span class="brand-mark">K</span><span>Kshetrajna<small>Your local intelligence</small></span></a>
-      <span class="nav-label">YOUR SPACE</span>
-      <nav class="side-nav">
-        <a href="#overview" data-view="overview"><span aria-hidden="true">◈</span>Overview</a>
-        <a href="#chat" data-view="chat"><span aria-hidden="true">✦</span>Assistant</a>
-        <a href="#files" data-view="files"><span aria-hidden="true">▤</span>File library</a>
-        <a href="#sort-ai" data-view="sort-ai"><span aria-hidden="true">⇄</span>Sort AI <small>Projects & files</small></a>
-        <a href="#cleanup" data-view="cleanup"><span aria-hidden="true">🗑</span>Disk Cleanup <small>Empty & duplicates</small></a>
-        <a href="#workspaces" data-view="workspaces"><span aria-hidden="true">▦</span>Workspaces</a>
-        <a href="#maintenance" data-view="maintenance"><span aria-hidden="true">◇</span>System tools</a>
-        <a href="#history" data-view="history"><span aria-hidden="true">◷</span>History & undo</a>
-        <a href="#privacy" data-view="privacy"><span aria-hidden="true">⚙</span>Settings</a>
+      <span class="nav-label">OBSERVE · REVIEW · RECOVER</span>
+      <nav class="side-nav" aria-label="Primary">
+        <a href="#overview" data-view="overview"><span aria-hidden="true">◈</span>System Health</a>
+        <a href="#cleanup" data-view="cleanup"><span aria-hidden="true">◇</span>Recover Space</a>
+        <a href="#memory" data-view="memory"><span aria-hidden="true">▥</span>Investigate Memory</a>
+        <a href="#sort-ai" data-view="sort-ai"><span aria-hidden="true">⇄</span>Organize Files</a>
+        <a href="#history" data-view="history"><span aria-hidden="true">◷</span>History &amp; Recovery</a>
+        <a href="#privacy" data-view="privacy"><span aria-hidden="true">⚙</span>Privacy</a>
+        <a href="#chat" data-view="chat"><span aria-hidden="true">✦</span>Local Assistant <small>Optional</small></a>
       </nav>
-      <div class="sidebar-note"><span class="local-orb"></span><strong>On your device</strong><p>Your files stay local.<br>Every move has a record.</p></div>
+      <div class="sidebar-note"><span class="local-orb"></span><strong>Local, with your approval</strong><p>Observe first. Review changes.<br>Keep recovery within reach.</p></div>
     </aside>
     <header class="topbar">
       <div class="brand"><span class="brand-mark">K</span><div><strong>Kshetrajna</strong><small>THE INTELLIGENCE THAT KNOWS THE FIELD</small></div></div>
-      <div class="topbar-label">PERSONAL INTELLIGENCE <span>/</span> LOCAL WORKSPACE</div>
+      <div class="topbar-label">PC HEALTH <span>/</span> LOCAL &amp; REVIEWED</div>
+      <label class="mode-control" for="ui-mode">View <select id="ui-mode" aria-describedby="ui-mode-note"><option value="basic">Basic</option><option value="expert">Expert</option></select></label>
       <div class="status" id="status"><span class="status-dot"></span><span id="status-text">Loading…</span></div>
     </header>
 
-    <main aria-labelledby="view-title">
-      <div class="view-heading"><div><p class="eyebrow" id="view-kicker">YOUR DEVICE, UNDERSTOOD</p><h1 id="view-title" tabindex="-1">Overview</h1><p id="view-description">A calm view of what matters on your computer.</p></div><a href="#sort-ai" class="heading-action">Organize my files <span>↗</span></a></div>
+    <main id="main-content" tabindex="-1" aria-labelledby="view-title">
+      <div class="view-heading"><div><p class="eyebrow" id="view-kicker">YOUR DEVICE, UNDERSTOOD</p><h1 id="view-title" tabindex="-1">System Health</h1><p id="view-description">Observe your computer before deciding what to change.</p></div><a href="#history" class="heading-action">History &amp; Recovery <span aria-hidden="true">↗</span></a></div>
+      <p id="ui-mode-note" class="view-mode-note">Basic shows everyday tools. Expert reveals advanced controls; it never enables permissions or approves an action.</p>
       <section class="hero">
-        <div><p class="eyebrow">A LITTLE LESS FRICTION</p><h2>Your space.<br><em>Working together.</em></h2><p class="intro">See your workload, find your files, and organize your projects. Everything stays on this device.</p><div class="hero-links"><a href="#chat">Ask your assistant ↗</a><a href="#files">Explore file library ↗</a></div></div>
+        <div><p class="eyebrow">UNDERSTAND BEFORE YOU ACT</p><h2>A clearer picture.<br><em>A considered next step.</em></h2><p class="intro">Read system pressure, review storage candidates, and give files a home. No automatic RAM cleaning or silent file changes.</p><div class="hero-links"><a href="#memory">Investigate memory ↗</a><a href="#cleanup">Review storage ↗</a></div></div>
         <div class="hero-action"><button id="capture-button" class="primary" disabled>Enable collection</button><button id="export-button" class="secondary">Download session report</button><small>Explainable · Measurable · Under your control</small></div>
       </section>
       <section class="mode-banner" aria-label="Data source"><div><strong id="mode-label">Connecting to your local engine</strong><p id="mode-detail">All analysis happens on this device.</p></div><label id="scenario-control" hidden>Demo scenario <select id="scenario"><option>Development</option><option>Meeting</option><option>Creative</option><option>Gaming</option></select></label></section>
@@ -54,12 +55,41 @@
         <p class="control-note">Ask about your PC, review memory-heavy apps, or prepare a cleanup. System changes need your approval. General conversation uses an installed local model; chat stays in memory until cleared or the app stops.</p>
         <div class="chat-model-controls"><label class="input-label">Local model<select id="chat-model" aria-label="Local model"><option value="">Checking models...</option></select></label><button type="button" id="chat-model-refresh" class="secondary">Refresh models</button><button type="button" id="chat-ai-toggle" class="secondary">Enable local AI</button><button type="button" id="chat-unload" class="text-button">Unload model</button></div>
         <p id="chat-model-status" class="control-note" role="status">Connecting to your local model runtime...</p>
-        <div id="chat-messages" class="chat-messages" role="log" aria-label="Conversation" aria-live="polite"><div class="chat-welcome"><strong>What would you like to do?</strong><p>I can inspect live readings and prepare actions. Try “free up RAM” or “show idle processes”. Nothing changes until you approve a review card.</p></div></div>
-        <div class="chat-suggestions"><button type="button" data-chat-prompt="Review memory-heavy apps and help me free up RAM">Free up RAM</button><button type="button" data-chat-prompt="Show idle background processes">Review idle apps</button><button type="button" data-chat-prompt="Preview temporary file cleanup">Clean temporary files</button><button type="button" data-chat-prompt="Help me organize my Downloads files">Organize files</button></div>
+        <div id="chat-messages" class="chat-messages" role="log" aria-label="Conversation" aria-live="polite"><div class="chat-welcome"><strong>What would you like to understand?</strong><p>I can explain collected readings and prepare a review. Model suggestions are not permissions, verified outcomes, or a promise of a faster PC. You can investigate memory without chat.</p><a href="#memory">Open read-only memory investigation</a></div></div>
+        <div class="chat-suggestions"><button type="button" data-chat-prompt="Explain current memory pressure and memory-heavy apps without changing anything">Explain memory pressure</button><button type="button" data-chat-prompt="Show idle background processes">Review idle apps</button><button type="button" data-chat-prompt="Preview temporary file cleanup">Review temporary files</button><button type="button" data-chat-prompt="Help me organize my Downloads files">Organize files</button></div>
         <form id="chat-form"><label for="chat-input" class="eyebrow">YOUR MESSAGE</label><div class="chat-composer"><textarea id="chat-input" maxlength="2000" rows="2" placeholder="Ask a question or tell me what you want to review..." required></textarea><button type="submit" id="chat-send" class="primary">Send</button><button type="button" id="chat-stop" class="secondary" hidden>Stop</button></div><p id="chat-feedback" class="feedback" role="status"></p></form>
       </section>
 
-      <section class="metrics" aria-label="Current system metrics">
+      <section id="memory-investigation" class="panel memory-investigation" aria-labelledby="memory-investigation-title">
+        <div class="panel-head"><div><p class="eyebrow">OBSERVE / NO CHANGES</p><h2 id="memory-investigation-title">Where is memory going?</h2></div><span class="pill">Read-only</span></div>
+        <div class="observation-times"><p id="memory-observed-at">No sample timestamp available</p><p id="memory-evaluated-at">Diagnosis evaluation timestamp unavailable</p></div>
+        <p id="memory-freshness" class="control-note">No memory sample yet. Enable collection in System Health when you are ready.</p>
+        <dl class="memory-facts">
+          <div><dt>Physical memory in use · last sample</dt><dd id="memory-physical">Unavailable</dd><dd id="memory-physical-status" class="resource-detail">Current diagnosis: Unknown</dd></div>
+          <div><dt>Available physical memory</dt><dd id="memory-available">Unavailable</dd></div>
+          <div><dt>Committed / commit limit · last sample</dt><dd id="memory-commit">Unavailable</dd><dd id="memory-commit-status" class="resource-detail">Current diagnosis: Unknown</dd></div>
+          <div><dt>System cache · overlapping counter</dt><dd id="memory-cache">Unavailable</dd></div>
+          <div><dt>OS low-memory signal · last sample</dt><dd id="memory-low-signal">Unavailable</dd><dd id="memory-low-signal-status" class="resource-detail">Current diagnosis: Unknown</dd></div>
+        </dl>
+        <p id="memory-pressure-explanation" class="approval-effect">There is not enough evidence to describe current memory pressure.</p>
+        <div class="memory-guidance"><h3>High usage is not automatically a problem</h3><p>Windows standby pages are already reusable. System cache overlaps other memory figures: do not add it to available RAM or treat it as wasted memory. Process working sets overlap shared pages and do not add up to total system usage.</p><p>If you notice pauses, compare repeated readings with your workload. Save work and close an app yourself if you no longer need it. A working-set trim can cause refaults and latency; it does not release committed allocations or prove a speedup.</p><p>No assistant, model, or maintenance permission is needed for this page. Missing counters remain unavailable, not zero. Manage collection in <a href="#overview">System Health</a>.</p><p data-expert>Advanced actions remain separate from observation. <a href="#maintenance">Review Expert system tools</a>; each still requires capability permission and individual approval. Recovery is always in <a href="#history">History &amp; Recovery</a>.</p></div>
+      </section>
+
+      <section class="panel" id="resource-health" aria-labelledby="resource-health-title">
+        <div class="panel-head"><div><p class="eyebrow">SEPARATE EVIDENCE / NO COMBINED SCORE</p><h2 id="resource-health-title">Resource diagnoses</h2></div><span class="pill">Read-only</span></div>
+        <div class="observation-times"><p id="health-observed-at">No sample timestamp available</p><p id="health-evaluated-at">Diagnosis evaluation timestamp unavailable</p></div>
+        <p id="health-freshness" class="control-note">No samples available. Current resource diagnoses are unknown.</p>
+        <dl class="resource-statuses">
+          <div><dt>CPU load</dt><dd id="health-cpu">Unknown</dd></div>
+          <div><dt>Physical memory use</dt><dd id="health-physical">Unknown</dd></div>
+          <div><dt>Commit use</dt><dd id="health-commit">Unknown</dd></div>
+          <div><dt>OS low-memory signal</dt><dd id="health-os-low-memory">Unknown</dd></div>
+          <div><dt>Memory pressure · memory evidence only</dt><dd id="health-memory-pressure">Unknown</dd></div>
+          <div><dt>Windows system-volume use</dt><dd id="health-disk">Unknown</dd><dd id="health-disk-detail" class="resource-detail">Capacity unavailable</dd></div>
+        </dl>
+        <p class="control-note">Physical memory and commit are different constraints. Low physical use does not rule out high commit use. Cache overlaps other figures; these counters must not be added together. Stale values remain historical, not current diagnoses.</p>
+      </section>
+      <section class="metrics" aria-label="Latest sampled system metrics">
         <article class="metric"><div class="metric-label">CPU LOAD <span>01</span></div><div class="metric-value" id="cpu">—</div><div class="meter"><i id="cpu-bar"></i></div><p>Share of total processor capacity</p></article>
         <article class="metric"><div class="metric-label">MEMORY USED <span>02</span></div><div class="metric-value" id="memory">—</div><div class="meter"><i id="memory-bar"></i></div><p id="memory-detail">Physical memory</p></article>
         <article class="metric"><div class="metric-label">FOREGROUND APP <span>03</span></div><div class="metric-value app-value" id="foreground">—</div><p id="idle">No activity sample yet</p></article>
@@ -67,17 +97,17 @@
 
       <section class="intelligence-grid" id="insights">
         <article class="panel context-panel"><p class="eyebrow">01 / UNDERSTAND</p><div class="context-heading"><h2 id="context-name">Waiting for data</h2><span class="pill" id="context-confidence">—</span></div><p id="context-explanation" class="control-note"></p><div class="learning-stats"><div><strong id="active-minutes">0</strong><small>active minutes observed</small></div><div><strong id="sample-count">0</strong><small>local samples analyzed</small></div><div><strong id="switch-count">0</strong><small>app switches observed</small></div></div><div class="prediction"><span class="eyebrow">LIKELY NEXT APP</span><strong id="next-app">Gathering observations</strong><small id="next-evidence">Predictions appear after repeated app switches.</small><small id="next-alternatives"></small><p id="prediction-quality" class="control-note"></p></div><div id="contextual-files-section" hidden><p class="eyebrow">CURRENT WORKSPACE FILES</p><div id="contextual-files" class="workflow-list"></div></div></article>
-        <article class="panel"><div class="panel-head"><div><p class="eyebrow">02 / PRIORITIZE</p><h2>What matters now</h2></div><span class="pill" id="pressure">Unknown pressure</span></div><div id="rankings" class="rankings"></div><p class="quiet">Importance combines foreground use, frequency, and recency.</p></article>
+        <article class="panel"><div class="panel-head"><div><p class="eyebrow">02 / PRIORITIZE</p><h2>Observed app importance</h2></div><span class="pill" id="pressure">Activity ranking</span></div><div id="rankings" class="rankings"></div><p class="quiet">Importance combines foreground use, frequency, and recency. It is not a current resource diagnosis.</p></article>
       </section>
-      <section class="panel recommendations-panel" id="decisions"><div class="panel-head"><div><p class="eyebrow">03 / PROPOSE</p><h2>Decisions you can inspect</h2></div><span class="quiet">APPROVAL REQUIRED</span></div><div id="recommendations" class="recommendation-grid"></div></section>
+      <section class="panel recommendations-panel" id="decisions" data-expert><div class="panel-head"><div><p class="eyebrow">EXPERT / PROPOSE</p><h2>Decisions you can inspect</h2></div><span class="quiet">APPROVAL REQUIRED</span></div><div id="recommendations" class="recommendation-grid"></div></section>
       <section class="panel recommendations-panel" id="maintenance"><div class="panel-head"><div><p class="eyebrow">SYSTEM TOOLS</p><h2>Windows maintenance</h2></div><span id="maintenance-status" class="quiet">REVIEW EACH ACTION</span></div><p class="control-note">Storage cleanup removes disk files. Memory trimming changes resident pages and may slow an app. Each action explains its scope and whether it can be undone. Windows cleanup tools ask you to choose what to remove.</p><div id="maintenance-actions" class="recommendation-grid"></div></section>
       <section class="grid lower-grid">
-        <article class="panel"><div class="panel-head"><div><p class="eyebrow">04 / ADAPT</p><h2>Your workspace board</h2></div><button id="workspace-reset" class="text-button">Reset board</button></div><p class="control-note">Save the apps that belong together. Activating a board adapts this dashboard; it does not move Windows windows.</p><p class="eyebrow">RECURRING APP GROUPS</p><div id="learned-workflows" class="workflow-list"></div><p class="eyebrow">ORDERED ROUTINES</p><div id="learned-sequences" class="workflow-list"></div><form id="workspace-form"><label class="input-label">Workspace name<input id="workspace-name" maxlength="50" placeholder="My focus workspace" required></label><div id="workspace-choices" class="workspace-choices"></div><button type="submit" class="secondary">Save workspace</button></form><div id="saved-workspaces" class="saved-workspaces"></div><div id="workspace-board" class="workspace-board"></div></article>
+        <article class="panel" data-expert><div class="panel-head"><div><p class="eyebrow">EXPERT / WORKSPACE</p><h2>Your workspace board</h2></div><button id="workspace-reset" class="text-button">Reset board</button></div><p class="control-note">Save the apps that belong together. Activating a board adapts this dashboard; it does not move Windows windows.</p><p class="eyebrow">RECURRING APP GROUPS</p><div id="learned-workflows" class="workflow-list"></div><p class="eyebrow">ORDERED ROUTINES</p><div id="learned-sequences" class="workflow-list"></div><form id="workspace-form"><label class="input-label">Workspace name<input id="workspace-name" maxlength="50" placeholder="My focus workspace" required></label><div id="workspace-choices" class="workspace-choices"></div><button type="submit" class="secondary">Save workspace</button></form><div id="saved-workspaces" class="saved-workspaces"></div><div id="workspace-board" class="workspace-board"></div></article>
         <article class="panel"><div class="panel-head"><div><p class="eyebrow">05 / EVALUATE &amp; UNDO</p><h2>Decision journal</h2></div><span class="quiet">60-SECOND TRIALS</span></div><p class="control-note">Trials restore the selected process on expiry, pause, or shutdown. Observed changes are not proof of a performance improvement.</p><div id="decision-journal" class="decision-journal"></div></article>
       </section>
       <section class="grid">
-        <article class="panel trend-panel"><div class="panel-head"><div><p class="eyebrow">SYSTEM TREND</p><h2>Recent pressure</h2></div><span class="quiet" id="last-seen">No samples</span></div><div class="legend"><span><i class="cpu-key"></i> CPU</span><span><i class="memory-key"></i> Memory</span></div><div class="chart" id="chart" role="img" aria-label="Recent CPU and memory percentages"></div><div class="chart-axis"><span>Older</span><span>Now</span></div></article>
-        <article class="panel"><div class="panel-head"><div><p class="eyebrow">LIVE VIEW</p><h2>Top processes</h2></div><span class="quiet">CPU · WORKING SET</span></div><div class="table-wrap"><table><thead><tr><th>Application</th><th>CPU</th><th>RAM</th></tr></thead><tbody id="processes"><tr><td colspan="3" class="empty">No process samples yet.</td></tr></tbody></table></div></article>
+        <article class="panel trend-panel"><div class="panel-head"><div><p class="eyebrow">SAMPLED UTILIZATION / HISTORY</p><h2>Recent CPU &amp; physical use</h2></div><span class="quiet" id="last-seen">No samples</span></div><div class="legend"><span><i class="cpu-key"></i> CPU</span><span><i class="memory-key"></i> Physical memory</span></div><div class="chart" id="chart" role="img" aria-label="Historical CPU and physical memory percentages" aria-describedby="chart-summary"></div><p id="chart-summary" class="control-note">No trend samples available.</p><div class="chart-axis"><span>Older</span><span>Latest sample</span></div></article>
+        <article class="panel"><div class="panel-head"><div><p class="eyebrow">LATEST SAMPLE / MAY BE HISTORICAL</p><h2>Top processes</h2></div><span class="quiet">CPU · WORKING SET</span></div><div class="table-wrap"><table><thead><tr><th>Application</th><th>CPU</th><th>RAM</th></tr></thead><tbody id="processes"><tr><td colspan="3" class="empty">No process samples yet.</td></tr></tbody></table></div></article>
       </section>
 
       <section class="grid lower-grid">
@@ -87,9 +117,10 @@
           <form id="settings-form">
             <label class="toggle-row"><span><strong>Process samples</strong><small>Save top application resource use</small></span><input type="checkbox" name="track_processes"></label>
             <label class="toggle-row"><span><strong>Foreground activity</strong><small>Save app switches and idle transitions</small></span><input type="checkbox" name="track_foreground"></label>
-            <label class="toggle-row"><span><strong>Allow live priority trials</strong><small>Off by default. Each trial still needs explicit approval.</small></span><input type="checkbox" name="allow_priority_changes"></label>
+            <label class="toggle-row" data-expert><span><strong>Allow live priority trials</strong><small>Off by default. Each trial still needs explicit approval.</small></span><input type="checkbox" name="allow_priority_changes"></label>
             <label class="toggle-row"><span><strong>Allow Windows maintenance</strong><small>Review each tool launch, Store cache reset or background memory trim. Some actions have no undo.</small></span><input type="checkbox" name="allow_maintenance"></label>
             <label class="toggle-row"><span><strong>Allow reviewed app controls</strong><small>Ask one allowlisted background app to close. Force termination requires its exact name and can lose unsaved work.</small></span><input type="checkbox" name="allow_process_control"></label>
+            <div data-expert class="expert-danger"><label class="toggle-row"><span><strong>Allow permanent file deletion</strong><small>Expert danger capability. Irreversible; every exact file still requires separate approval. Not available on older backends.</small></span><input type="checkbox" name="allow_permanent_delete" disabled></label><p id="permanent-delete-support" class="control-note">Checking backend support. Permanent deletion is unavailable until explicitly supported and enabled.</p></div>
             <div class="field-grid"><label>Sample every<select name="sample_interval_seconds"><option value="2">2 seconds</option><option value="5">5 seconds</option><option value="10">10 seconds</option><option value="30">30 seconds</option><option value="60">60 seconds</option></select></label><label>Keep history<select name="retention_days"><option value="1">1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option></select></label></div>
             <div class="control-actions"><button type="submit" class="secondary">Save preferences</button><button type="button" id="delete-button" class="danger">Delete recorded history</button><button type="button" id="quit-button" class="secondary">Quit Kshetrajna</button></div>
           </form>
@@ -102,7 +133,7 @@
           <div id="library-summary" class="summary-grid"></div>
           <button type="button" id="scan-laptop" class="primary">Choose locations · scan together</button>
           <p class="control-note">One approval for your selected personal and drive data folders. System files, app data, credentials, links and cloud-only files are excluded. Add other locations by path below.</p>
-          <p class="control-note">Known Desktop, Downloads, Documents, and OneDrive folders are discovered locally without scanning. Approve a folder to start indexing; only basic metadata and bounded text excerpts are collected.</p>
+           <p class="control-note">Known Desktop, Downloads, Documents, and OneDrive folders are discovered locally without scanning. Folder approval on this version includes metadata and bounded allowed text, Office and PDF inspection. Excerpts can be stored in the local file index. Do not approve sensitive locations unless you accept this scope.</p>
           <div id="known-folders" class="known-folders"></div>
           <div id="roots-list" class="workflow-list"></div>
           <form id="add-root-form">
@@ -131,8 +162,8 @@
         <div class="sort-hero">
           <div>
             <p class="eyebrow">START WITH THE CLEAR MATCHES</p>
-            <h3>Move the obvious files first.</h3>
-            <p>Sort AI separates safe, explainable matches from files that need your judgment. Nothing moves until you approve a batch, and sorting never deletes files.</p>
+             <h3>Explain the match. Review the destination.</h3>
+             <p>Clear matches are rule-based suggestions, not a guarantee of the right home. Inspect source paths, evidence, and destination groups; keep uncertain files in place. Nothing moves until you approve the exact batch, and sorting never deletes files.</p>
           </div>
           <div class="sort-hero-proof"><strong>Approve the batch once</strong><span>for clear matches</span><small>Review exceptions separately</small></div>
         </div>
@@ -174,7 +205,7 @@
           <div id="file-insights-types" class="table-wrap"></div>
           <div class="file-review-section">
             <p class="eyebrow">CONTENT REVIEW</p>
-            <h3>Automatic file decisions</h3>
+             <h3>Suggested file decisions</h3>
             <p class="control-note">Kshetrajna combines filename, path, file type, bounded content, and related files. It recommends what to do; it never silently deletes or moves your files.</p>
             <div id="file-insights-reviews"></div>
           </div>
@@ -188,8 +219,10 @@
       </section>
       <section class="grid lower-grid cleanup-grid" id="cleanup">
         <article class="panel cleanup-overview">
-          <div class="panel-head"><div><p class="eyebrow">CLEANUP SCOPE</p><h2>Inspect before you reclaim</h2></div><span class="quiet" id="cleanup-scope-status" role="status" aria-live="polite">SCAN REQUIRED</span></div>
-          <p class="control-note">Cleanup only uses files already indexed in your approved locations. Pick a scope, scan it, then review every exact path before an action. A scan never deletes anything.</p>
+           <div class="panel-head"><div><p class="eyebrow">REVIEW STORAGE</p><h2>Inspect before changing files</h2></div><span class="quiet" id="cleanup-scope-status">SCAN REQUIRED</span></div>
+           <p class="control-note">Cleanup only uses files already indexed in your approved locations. Pick a scope, scan it, then review every exact path before an action. A scan never deletes anything.</p>
+           <p class="storage-truth">Quarantine retains file bytes, normally on the same volume. It does <strong>not free disk capacity</strong>. Duplicate totals describe potential duplicate storage, not measured free-space gains. Zero-byte files offer zero content-byte savings.</p><a class="recovery-link" href="#history">Open History &amp; Recovery ↗</a>
+           <div class="storage-observation"><h3>Observed Windows system-volume capacity</h3><p id="storage-capacity">Capacity unavailable</p><p id="storage-capacity-status">Current volume-use diagnosis: Unknown</p><p id="storage-observed-at" class="control-note">No sample timestamp available</p><p id="storage-capacity-freshness" class="control-note">No samples available.</p><p class="control-note">Caller-visible capacity on one fixed Windows system volume, subject to quotas. This is not all disks, the selected file-index scope, or potential cleanup savings.</p></div>
           <div class="cleanup-toolbar">
             <label class="input-label" for="cleanup-scope">Approved scope<select id="cleanup-scope"><option value="all">All approved locations</option></select></label>
             <div class="cleanup-scope-copy"><strong id="cleanup-scope-label">All approved locations</strong><span id="cleanup-scope-path">Waiting for an approved, indexed location.</span></div>
@@ -229,9 +262,17 @@
   </div>
   <dialog id="approval-dialog"><p class="eyebrow">REVIEW BEFORE APPROVAL</p><h2 id="approval-title"></h2><p id="approval-reason"></p><div id="approval-effect" class="approval-effect"></div><p id="approval-mode" class="control-note"></p><p class="control-note">Undo is available in the journal. A live trial restores this PID only; newly spawned child processes may inherit its priority. If the app crashes, restart it to attempt recovery.</p><div class="control-actions"><button id="confirm-trial" class="primary">Approve 60-second trial</button><button id="cancel-trial" class="secondary">Cancel</button></div></dialog>
   <dialog id="maintenance-dialog"><p class="eyebrow">REVIEW SYSTEM ACTION</p><h2 id="maintenance-title"></h2><p id="maintenance-effect"></p><div id="maintenance-candidates" class="maintenance-candidates"></div><p id="maintenance-undo" class="approval-effect"></p><p id="maintenance-mode" class="control-note"></p><div class="control-actions"><button id="maintenance-confirm" class="primary">Approve this action</button><button id="maintenance-cancel" class="secondary">Cancel</button></div></dialog>
-   <dialog id="file-permission-dialog"><p class="eyebrow">FILE ACCESS PERMISSION</p><h2>Approve local folder access?</h2><p id="file-permission-copy"></p><div class="approval-effect"><strong id="file-permission-label"></strong><code id="file-permission-path"></code></div><ul class="permission-list"><li>Reads file names, relative paths, sizes, and timestamps.</li><li>Inspects up to 4 KB from allowed text files for local content insights and review signals.</li><li>Skips sensitive files, links, protected paths, and inaccessible files.</li><li>Does not move, rename, delete, or upload files during scanning.</li><li>Binary and media files are categorized from metadata; their contents are not opened.</li></ul><p class="control-note">This is Kshetrajna's app-level approval. Windows permissions still apply; an administrator prompt is not required or created by this step.</p><div class="control-actions"><button id="file-permission-confirm" class="primary">Approve and scan</button><button id="file-permission-cancel" class="secondary">Cancel</button></div></dialog>
+    <dialog id="file-permission-dialog" aria-labelledby="file-permission-title" aria-describedby="file-permission-copy">
+      <p class="eyebrow">FILE ACCESS / CONTENT SCOPE</p>
+      <h2 id="file-permission-title">Approve local folder inspection?</h2>
+      <p id="file-permission-copy"></p>
+      <div class="approval-effect"><strong id="file-permission-label"></strong><code id="file-permission-path"></code></div>
+      <ul class="permission-list"><li>Reads file names, relative paths, sizes, and timestamps.</li><li>This scanner can inspect bounded allowed text, Office and PDF excerpts and store them in the local file index. This is not a metadata-only approval.</li><li>Skips known sensitive files, links, protected paths, and inaccessible files. Exclusions cannot identify every private document.</li><li>Does not move, rename, delete, or upload files during scanning.</li><li>Other binary and media files use metadata during indexing. Opening a supported preview is a separate local read.</li></ul>
+      <p class="control-note">Use file-index erasure to remove stored excerpts and metadata. Necessary recovery data may remain. Windows permissions still apply; this app-level approval creates no administrator prompt.</p>
+      <div class="control-actions"><button id="file-permission-confirm" class="primary">Approve and scan</button><button id="file-permission-cancel" class="secondary">Cancel</button></div>
+    </dialog>
    <dialog id="file-review-dialog" class="file-review-dialog"><p class="eyebrow">FILE PREVIEW</p><h2 id="file-review-title"></h2><code id="file-review-path"></code><p id="file-review-summary" class="approval-effect"></p><p id="file-review-reason" class="sort-warning"></p><div id="file-review-image-panel" class="file-review-image-panel" hidden><p id="file-review-image-status" role="status"></p><div id="file-review-image-stage" class="file-review-image-stage"><img id="file-review-image" alt="" hidden></div><button id="file-review-image-zoom" type="button" class="secondary" disabled>View at actual size</button></div><div id="file-review-pdf-panel" class="file-review-pdf-panel" hidden><p id="file-review-pdf-status" role="status"></p><iframe id="file-review-pdf" title="PDF document preview" sandbox="allow-same-origin"></iframe></div><pre id="file-review-excerpt" class="file-review-excerpt"></pre><p id="file-review-metadata" class="control-note"></p><div class="control-actions"><button id="file-review-close" class="primary">Close preview and choose action</button></div></dialog>
-   <dialog id="file-review-action-dialog"><p class="eyebrow">AUTOMATIC DECISION</p><h2>Recommended next step</h2><p id="file-review-action-copy"></p><p class="control-note">Kshetrajna chooses from content, filename, path, related files, and file type. You can use its recommendation or choose a different action. Delete is permanent and requires one more confirmation.</p><div class="control-actions"><button id="file-review-auto" class="primary">Use automatic recommendation</button><button id="file-review-keep" class="secondary">Keep it for now</button><button id="file-review-move" class="secondary">Move it somewhere</button><button id="file-review-delete" class="danger">Delete permanently</button></div></dialog>
+    <dialog id="file-review-action-dialog" aria-labelledby="file-review-action-title" aria-describedby="file-review-action-copy"><p class="eyebrow">SUGGESTION / YOUR DECISION</p><h2 id="file-review-action-title">Review a suggested next step</h2><p id="file-review-action-copy"></p><p class="control-note">Evidence may include filename, path, file type, related files and separately approved content. A recommendation is not proof that a file is disposable or belongs in a particular folder. Review a destination before any move; cleanup suggestions open recoverable candidate review. Permanent deletion is a separately enabled Expert capability with no undo.</p><div class="control-actions"><button id="file-review-auto" class="primary">Review suggested next step</button><button id="file-review-keep" class="secondary">Keep it for now</button><button id="file-review-move" class="secondary">Choose a move destination</button><button id="file-review-delete" class="danger" data-expert>Delete permanently</button></div></dialog>
   <dialog id="chat-action-dialog"><p class="eyebrow">REVIEW BEFORE APPROVAL</p><h2 id="chat-action-title"></h2><p id="chat-action-effect"></p><p id="chat-action-undo" class="approval-effect"></p><div id="chat-action-candidates" class="maintenance-candidates" hidden></div><label id="chat-action-name-row" class="input-label" hidden>Type the exact app name to confirm force termination<input id="chat-action-name" autocomplete="off" maxlength="150"></label><p id="chat-action-mode" class="control-note"></p><p id="chat-action-error" class="feedback" role="alert"></p><div class="control-actions"><button type="button" id="chat-action-confirm" class="primary">Approve this action</button><button type="button" id="chat-action-cancel" class="secondary">Cancel</button></div></dialog>
   <dialog id="sort-confirm-dialog" aria-labelledby="sort-confirm-title"><p class="eyebrow">SORT AI / ONE BATCH APPROVAL</p><h2 id="sort-confirm-title"></h2><p id="sort-confirm-copy" style="white-space: pre-line"></p><div class="control-actions"><button id="sort-confirm-approve" type="button" class="primary">Approve</button><button id="sort-confirm-cancel" type="button" class="secondary">Cancel</button></div></dialog>
   <dialog id="locations-dialog" aria-labelledby="locations-title"><p class="eyebrow">ONE LOCAL ACCESS APPROVAL</p><h2 id="locations-title">Choose your scan scope</h2><p>Index selected folders locally, up to 200,000 files per location. Reads metadata and bounded allowed excerpts. No files move during scanning; no uploads or administrator privileges.</p><label class="scope-all"><input type="checkbox" id="locations-all"> Select available locations</label><div id="locations-list" class="locations-list"></div><p class="control-note">Up to 20 non-overlapping locations. Existing approved folders and their children are reused. System/app data, protected files, links, cloud-only files and inaccessible paths are skipped. Scans can be cancelled in the library.</p><p id="locations-feedback" class="feedback" role="status"></p><div class="control-actions"><button type="button" id="locations-confirm" class="primary">Approve selected locations & scan</button><button type="button" id="locations-cancel" class="secondary">Cancel</button></div></dialog>

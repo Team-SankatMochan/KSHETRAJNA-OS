@@ -11,6 +11,7 @@ function element(tag, text, className = '') {
 function button(text, action, className = 'secondary') {
   const node = element('button', text, className);
   node.type = 'button';
+  node.dataset.focusKey = `button:${text}`;
   node.addEventListener('click', action);
   return node;
 }
@@ -20,6 +21,7 @@ async function mutate(path, payload, message) {
     const result = await post(path, payload);
     await refresh();
     if (result.decision?.status === 'restore_failed') throw new Error(result.decision.error);
+    if (['unknown', 'recovery_required'].includes(result.decision?.status)) throw new Error('Action outcome is unconfirmed. Inspect History & Recovery before another approval; do not replay the action blindly.');
     if (message) setFeedback(message);
     return result;
   } catch (error) { setFeedback(error.message, true); return null; }
@@ -28,7 +30,7 @@ async function mutate(path, payload, message) {
 function renderIntelligence(state) {
   latestState = state;
   const demo = state.mode === 'demo';
-  $('mode-label').textContent = demo ? 'SYNTHETIC DEMO / No Windows changes' : 'LIVE / Local Windows observations';
+  $('mode-label').textContent = demo ? 'SYNTHETIC DEMO / No Windows changes' : 'DEVICE DATA / Local Windows observations';
   $('mode-detail').textContent = demo ? 'Seeded app activity shows the entire workflow immediately. All approvals are simulated. Metrics are not benchmarks.' : 'Collection starts with your consent. Live priority trials require an extra opt-in and individual approval.';
   $('scenario-control').hidden = !demo;
   const model = state.intelligence;
@@ -38,8 +40,6 @@ function renderIntelligence(state) {
   $('active-minutes').textContent = model.active_minutes;
   $('sample-count').textContent = model.sample_count;
   $('switch-count').textContent = model.switches;
-  $('pressure').textContent = model.pressure + ' pressure';
-  $('pressure').classList.toggle('warning', model.pressure === 'High');
   $('next-app').textContent = model.prediction?.app || 'Gathering observations';
   $('next-evidence').textContent = model.prediction ? model.prediction.confidence + '/100 evidence score · ' + model.prediction.evidence : model.prediction_reason;
   $('next-alternatives').textContent = model.prediction?.alternatives?.length ? 'Other possibilities: ' + model.prediction.alternatives.map(a => a.app + ' (' + a.score + '/100)').join(', ') : '';
@@ -84,6 +84,7 @@ function renderIntelligence(state) {
   recommendations.replaceChildren();
   for (const proposal of state.recommendations) {
     const card = element('article', null, 'recommendation');
+    card.dataset.focusKey = `proposal:${proposal.id}`;
     card.append(element('span', proposal.kind === 'priority' ? 'CPU PRIORITY TRIAL' : proposal.kind.toUpperCase(), 'eyebrow'),
                 element('h3', proposal.title), element('p', proposal.reason), element('small', proposal.effect));
     const actions = element('div', null, 'control-actions');
@@ -92,7 +93,7 @@ function renderIntelligence(state) {
       review.disabled = !!state.active_actions.length || !state.settings.enabled;
       actions.append(review);
     } else if (proposal.kind === 'workspace') {
-      actions.append(button('Build workspace', () => $('workspace-form').scrollIntoView({ behavior: 'smooth', block: 'center' })));
+      actions.append(button('Build workspace', () => $('workspace-form').scrollIntoView({ behavior: reducedMotion.matches ? 'instant' : 'smooth', block: 'center' })));
     }
     actions.append(button('Dismiss', () => mutate('/api/actions/dismiss', { id: proposal.id }, 'Recommendation dismissed.'), 'text-button'));
     card.append(actions);
@@ -102,10 +103,11 @@ function renderIntelligence(state) {
   }
   renderWorkspaces(state);
   renderDecisions(state);
-  if (state.health.last_error) $('status-text').textContent = 'Collection needs attention';
+  if (state.health?.last_error) $('status-text').textContent = 'Collection needs attention';
 }
 
 function openApproval(proposal) {
+  if (!expertView()) return;
   pendingProposal = proposal;
   $('approval-title').textContent = proposal.title;
   $('approval-reason').textContent = proposal.reason;
@@ -113,7 +115,7 @@ function openApproval(proposal) {
   $('approval-mode').textContent = latestState.mode === 'demo'
     ? 'SIMULATION: this records a demo decision. It cannot modify Windows.'
     : 'LIVE ACTION: this changes the selected process CPU priority. It may slow that application. It does not free RAM.';
-  $('approval-dialog').showModal();
+  openDialog($('approval-dialog'));
 }
 
 function renderWorkspaces(state) {
@@ -126,6 +128,7 @@ function renderWorkspaces(state) {
       const label = element('label');
       const input = document.createElement('input');
       input.type = 'checkbox'; input.value = app; input.checked = true;
+      input.dataset.focusKey = `workspace-app:${app}`;
       label.append(input, document.createTextNode(app));
       choices.append(label);
     }
@@ -179,12 +182,13 @@ function renderDecisions(state) {
   journal.replaceChildren();
   for (const decision of state.decisions.slice(0, 8)) {
     const item = element('article', null, 'journal-entry');
+    item.dataset.focusKey = `decision:${decision.id}`;
     if (decision.kind === 'maintenance' || decision.kind === 'process_control') {
       item.append(element('span', (decision.mode === 'demo' ? 'SIMULATED / ' : '') + decision.status.replaceAll('_', ' ').toUpperCase(), 'eyebrow'),
         element('strong', decision.title), element('small', timeLabel(decision.created_at)),
         element('p', decision.result?.message || 'Outcome not recorded.', 'control-note'));
       if (decision.kind === 'process_control') item.append(element('small', decision.undo));
-      if (decision.result?.resident_reduction_mb != null) item.append(element('p', 'Immediate resident-memory reduction: ' + decision.result.resident_reduction_mb + ' MiB. This may be temporary.', 'control-note'));
+      if (decision.result?.resident_reduction_mb != null) item.append(element('p', 'Observed immediate resident difference (before minus after): ' + decision.result.resident_reduction_mb + ' MiB. This may be temporary; it is not proof of a speedup or released committed allocations.', 'control-note'));
       journal.append(item);
       continue;
     }
@@ -197,7 +201,10 @@ function renderDecisions(state) {
       const countdown = element('p', decision.error || 'Restoration due in ' + remaining + 's.', 'control-note');
       if (!decision.error) countdown.dataset.expires = decision.expires_at;
       item.append(countdown);
-      item.append(button('Undo now', () => mutate('/api/actions/undo', { id: decision.id, confirm: true }, 'Trial restoration completed.'), 'primary'));
+      item.append(button('Review undo', async () => {
+        if (!await requestSortApproval('Restore this priority trial?', `${decision.plan?.name || 'Selected process'}\n\nAttempt to restore this exact trial. Recovery remains available in Basic view; success depends on the process identity and current OS state.`)) return;
+        await mutate('/api/actions/undo', { id: decision.id, confirm: true }, 'Trial restoration completed.');
+      }, 'primary'));
     } else if (decision.evaluation) {
       const evaluation = decision.evaluation;
       item.append(element('p', evaluation.conclusion, 'control-note'));
@@ -213,15 +220,16 @@ function renderDecisions(state) {
   if (!state.decisions.length) journal.append(element('p', 'Your approvals, dismissals, outcomes, and undo history will appear here.', 'empty'));
 }
 
-document.addEventListener('kshetrajna-state', event => renderIntelligence(event.detail));
+document.addEventListener('kshetrajna-state', event => preserveFocus(() => renderIntelligence(event.detail)));
 $('confirm-trial').addEventListener('click', async () => {
-  if (!pendingProposal) return;
+  if (!pendingProposal || !expertView()) return;
   $('confirm-trial').disabled = true;
   const result = await mutate('/api/actions/approve', { id: pendingProposal.id, confirm: true }, 'Trial approved. Undo is available in the journal.');
   $('confirm-trial').disabled = false;
   if (result) $('approval-dialog').close();
 });
-$('cancel-trial').addEventListener('click', () => $('approval-dialog').close());
+$('cancel-trial').addEventListener('click', () => { pendingProposal = null; $('approval-dialog').close(); });
+$('approval-dialog').addEventListener('cancel', () => { pendingProposal = null; });
 $('scenario').addEventListener('change', event => mutate('/api/demo/scenario', { scenario: event.target.value }, 'Synthetic scenario loaded.'));
 $('workspace-form').addEventListener('submit', async event => {
   event.preventDefault();

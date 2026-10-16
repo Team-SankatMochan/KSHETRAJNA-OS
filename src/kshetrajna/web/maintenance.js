@@ -5,16 +5,20 @@ document.addEventListener('kshetrajna-state', event => {
   const allowed = state.mode === 'demo' || state.settings.allow_maintenance;
   $('maintenance-status').textContent = state.mode === 'demo' ? 'SIMULATION ONLY' : allowed ? 'REVIEW EACH ACTION' : 'ENABLE IN PRIVACY CONTROLS';
   const list = $('maintenance-actions');
-  const signature = JSON.stringify([(state.maintenance || []).map(a => a.id), allowed, state.mode]);
+  const signature = JSON.stringify([state.maintenance || [], allowed, state.mode]);
   if (list.dataset.signature === signature) return;
   list.dataset.signature = signature;
+  preserveFocus(() => {
   list.replaceChildren();
   for (const action of state.maintenance || []) {
     const card = element('article', null, 'recommendation');
+    card.dataset.focusKey = `maintenance:${action.id}`;
+    if (action.action === 'trim_memory') card.dataset.expert = '';
     card.append(element('span', action.action === 'trim_memory' ? 'MEMORY / ONE PROCESS' : 'WINDOWS MAINTENANCE', 'eyebrow'),
       element('h3', action.title), element('p', action.effect), element('small', action.undo));
     const controls = element('div', null, 'control-actions');
     const review = button(state.mode === 'demo' ? 'Review simulation' : 'Review action', async () => {
+      if (action.action === 'trim_memory' && !expertView()) return;
       try {
         const result = await post('/api/maintenance/preview', {id: action.id});
         maintenancePlan = result.plan;
@@ -31,7 +35,7 @@ document.addEventListener('kshetrajna-state', event => {
           if (result.plan.candidates.length > 20) candidates.append(element('small', `+ ${result.plan.candidates.length - 20} more bounded candidates`));
         }
         $('maintenance-mode').textContent = state.mode === 'demo' ? 'Simulation: no Windows changes.' : 'Live action on this PC. Approval expires in 60 seconds.';
-        $('maintenance-dialog').showModal();
+        openDialog($('maintenance-dialog'));
       } catch (error) { setFeedback(error.message, true); }
     }, 'primary');
     review.disabled = !allowed;
@@ -39,14 +43,16 @@ document.addEventListener('kshetrajna-state', event => {
     card.append(controls);
     list.append(card);
   }
+  });
 });
 
 $('maintenance-cancel').addEventListener('click', () => {
   maintenancePlan = null;
   $('maintenance-dialog').close();
 });
+$('maintenance-dialog').addEventListener('cancel', () => { maintenancePlan = null; });
 $('maintenance-confirm').addEventListener('click', async () => {
-  if (!maintenancePlan) return;
+  if (!maintenancePlan || (maintenancePlan.action === 'trim_memory' && !expertView())) return;
   $('maintenance-confirm').disabled = true;
   try {
     const result = await post('/api/maintenance/execute', {id: maintenancePlan.id, confirm: true});

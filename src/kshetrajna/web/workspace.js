@@ -1,14 +1,12 @@
 /* A focused workspace shell. Existing controls keep their IDs and listeners. */
 const viewCopy = {
-  overview: ['YOUR DEVICE, UNDERSTOOD', 'Overview', 'A calm view of your workload, pressure and next steps.'],
-  chat: ['THINK OUT LOUD', 'Your assistant', 'Conversation and reviewed PC tools, running on your device.'],
-  files: ['KNOW WHAT YOU HAVE', 'File library', 'Scan your chosen locations once. Find files and understand your index.'],
-  'sort-ai': ['A HOME FOR EVERYTHING', 'Sort AI', 'Connect scattered files to projects and existing folders.'],
-  cleanup: ['RECLAIM WASTED DISK SPACE', 'Disk Cleanup', 'Review 0-byte files and duplicate copies with recovery available.'],
-  workspaces: ['MAKE ROOM FOR FOCUS', 'Workspaces', 'Your recurring routines and saved application boards.'],
-  maintenance: ['A LITTLE HOUSEKEEPING', 'System tools', 'Inspect each action, its scope and its undo limitations.'],
-  history: ['EVERY CHANGE, ACCOUNTED FOR', 'History & undo', 'Inspect decisions and restore eligible changes.'],
-  privacy: ['YOUR DEVICE. YOUR CHOICE.', 'Settings', 'Control collection, actions, retention and local storage.'],
+  overview: ['OBSERVE / DIAGNOSE', 'System Health', 'Understand readings and workload before deciding what to change.'],
+  cleanup: ['REVIEW / APPROVE', 'Recover Space', 'Inspect duplicate storage and cleanup options. Quarantine retains bytes; it is not reclaimed capacity.'],
+  memory: ['READ / EXPLAIN', 'Investigate Memory', 'Physical memory, commit, cache and pressure. Read-only, independent of chat.'],
+  'sort-ai': ['EXPLAIN / ORGANIZE', 'Organize Files', 'Approve locations, inspect evidence, then review exact destinations. Uncertain files can stay put.'],
+  history: ['VERIFY / RECOVER', 'History & Recovery', 'Inspect recorded outcomes, undo eligible moves, and restore quarantined files. Recovery is available in Basic and Expert.'],
+  privacy: ['LOCAL / UNDER YOUR CONTROL', 'Privacy', 'Collection and action permissions are separate choices. View mode does not change them.'],
+  chat: ['OPTIONAL / LOCAL ASSISTANT', 'Local Assistant', 'Conversation can propose a review. Only your explicit approval can authorize a change.'],
 };
 const mainSurface = document.querySelector('main');
 const pageSurfaces = {};
@@ -23,24 +21,56 @@ const originalSections = [...mainSurface.querySelectorAll(':scope > section')];
 for (const section of originalSections) {
   let view = 'overview';
   if (section.id === 'chat') view = 'chat';
-  else if (section.id === 'maintenance') view = 'maintenance';
+  else if (section.id === 'maintenance') view = 'cleanup';
+  else if (section.id === 'memory-investigation') view = 'memory';
   else if (section.id === 'cleanup') view = 'cleanup';
-  else if (section.id === 'files' || section.querySelector('#file-insights-types')) view = 'files';
+  else if (section.id === 'files' || section.querySelector('#file-insights-types')) view = 'sort-ai';
   else if (section.id === 'sort-ai') view = 'sort-ai';
   if (section.querySelector('#workspace-form')) {
     const board = section.querySelector('#workspace-form').closest('article');
-    pageSurfaces.workspaces.append(board);
+    pageSurfaces.overview.append(board);
     pageSurfaces.history.append(section);
     continue;
   }
-  if (section.querySelector('#privacy')) pageSurfaces.privacy.append($('privacy'));
+  if (section.querySelector('#privacy')) {
+    pageSurfaces.history.append($('activity').closest('article'));
+    pageSurfaces.privacy.append($('privacy'));
+    section.remove();
+    continue;
+  }
   pageSurfaces[view].append(section);
 }
-// One shared source banner remains in Overview; live/demo status stays in the header.
+// Move existing nodes, not copies: their IDs, listeners and recovery state survive.
+pageSurfaces.memory.append($('processes').closest('article'));
+pageSurfaces.history.prepend(document.querySelector('.cleanup-recovery'));
+const fileJournal = element('article', null, 'panel');
+fileJournal.append(element('p', 'FILE ACTIONS', 'eyebrow'), element('h2', 'Reviewed file changes'), $('file-action-journal'));
+pageSurfaces.history.append(fileJournal);
+const sortJournal = element('article', null, 'panel');
+sortJournal.append(element('p', 'SORTING BATCHES', 'eyebrow'), element('h2', 'Inspect a batch before undo'),
+  element('p', 'Select a recorded batch to inspect exact paths and eligible undo options in Organize Files. A changed or occupied path will not be overwritten.', 'control-note'),
+  $('sort-history').closest('label'));
+pageSurfaces.history.append(sortJournal);
+const organizationLinks = element('nav', null, 'section-links');
+organizationLinks.setAttribute('aria-label', 'File organization steps');
+for (const [hash, label] of [['files', '1 · Approve & scan'], ['sort-ai', '2 · Preview & organize'], ['history', '3 · Review & recover']]) {
+  const link = element('a', label); link.href = `#${hash}`; organizationLinks.append(link);
+}
+pageSurfaces['sort-ai'].prepend(organizationLinks);
+const sortPanel = $('sort-ai');
+const librarySections = [...pageSurfaces['sort-ai'].children].filter(node => node !== organizationLinks && node !== sortPanel);
+pageSurfaces['sort-ai'].append(sortPanel, ...librarySections);
 function switchWorkspace() {
   const requested = location.hash.slice(1) || 'overview';
-  const aliases = {insights: 'overview', decisions: 'overview', files: 'files', 'sort-ai': 'sort-ai'};
-  const key = viewCopy[requested] ? requested : aliases[requested] || 'overview';
+  const skipToMain = requested === 'main-content';
+  const aliases = {insights: 'overview', decisions: 'overview', files: 'sort-ai', workspaces: 'overview', maintenance: 'cleanup'};
+  const key = skipToMain ? document.body.dataset.view || 'overview' : viewCopy[requested] ? requested : aliases[requested] || 'overview';
+  if (document.body.dataset.view && document.body.dataset.view !== key) {
+    for (const dialog of document.querySelectorAll('dialog[open]')) {
+      dialog.dispatchEvent(new Event('cancel', {cancelable: true}));
+      if (dialog.open) dialog.close();
+    }
+  }
   for (const [name, surface] of Object.entries(pageSurfaces)) surface.hidden = name !== key;
   document.querySelectorAll('.side-nav a').forEach(link => {
     const active = link.dataset.view === key;
@@ -56,10 +86,15 @@ function switchWorkspace() {
   window.scrollTo({top: 0, behavior: 'instant'});
   // Move the virtual cursor to the new page heading after an in-app route
   // change. The initial load keeps the browser's natural focus position.
-  if (document.body.dataset.workspaceReady === 'true') {
-    requestAnimationFrame(() => $('view-title')?.focus({preventScroll: true}));
+  if (skipToMain || document.body.dataset.workspaceReady === 'true') {
+    requestAnimationFrame(() => $(skipToMain ? 'main-content' : 'view-title')?.focus({preventScroll: true}));
   }
   document.body.dataset.workspaceReady = 'true';
+  // Old deep links still reach the original controls within the new task page.
+  if (['files', 'maintenance', 'workspaces'].includes(requested)) {
+    const target = requested === 'workspaces' ? $('workspace-form') : $(requested);
+    target?.scrollIntoView({behavior: reducedMotion.matches ? 'instant' : 'smooth', block: 'start'});
+  }
 }
 window.addEventListener('hashchange', switchWorkspace);
 switchWorkspace();
@@ -84,22 +119,25 @@ async function refreshOrganization() {
     organizationState = await request('/api/files/organization');
     fillRootChoices($('project-root'));
     const list = $('project-list');
-    list.replaceChildren();
-    if (!organizationState.projects.length) list.append(element('p', 'No project scopes yet. Add a name and its preferred folder below, or use a detected group after previewing.', 'empty'));
-    for (const project of organizationState.projects) {
-      const card = element('div', null, 'project-card');
-      const copy = element('div');
-      copy.append(element('strong', project.name), element('code', sortFolderPath({path: project.root_path}, project.folder)),
-                  element('small', project.aliases.length ? `Also matches: ${project.aliases.join(', ')}` : 'Matches this project name in filenames', 'quiet'));
-      card.append(copy, button('Remove rule', async () => {
-        if (!await requestSortApproval('Remove this project scope?', `Remove ${project.name}'s matching rule? Existing files stay where they are. Pending previews will expire.`)) return;
-        await post('/api/files/projects/remove', {project_id: project.id});
-        currentSortPlan = null;
-        renderSortPlan(null);
-        await refreshOrganization();
-      }, 'text-button'));
-      list.append(card);
-    }
+    preserveFocus(() => {
+      list.replaceChildren();
+      if (!organizationState.projects.length) list.append(element('p', 'No project scopes yet. Add a name and its preferred folder below, or use a detected group after previewing.', 'empty'));
+      for (const project of organizationState.projects) {
+        const card = element('div', null, 'project-card');
+        card.dataset.focusKey = `project:${project.id}`;
+        const copy = element('div');
+        copy.append(element('strong', project.name), element('code', sortFolderPath({path: project.root_path}, project.folder)),
+                    element('small', project.aliases.length ? `Also matches: ${project.aliases.join(', ')}` : 'Matches this project name in filenames', 'quiet'));
+        card.append(copy, button('Remove rule', async () => {
+          if (!await requestSortApproval('Remove this project scope?', `Remove ${project.name}'s matching rule? Existing files stay where they are. Pending previews will expire.`)) return;
+          await post('/api/files/projects/remove', {project_id: project.id, confirm: true});
+          currentSortPlan = null;
+          renderSortPlan(null);
+          await refreshOrganization();
+        }, 'text-button'));
+        list.append(card);
+      }
+    });
   } catch (error) { $('project-feedback').textContent = error.message; }
 }
 
@@ -110,6 +148,7 @@ function renderProjectCandidates(plan) {
   const known = new Set(organizationState.projects.map(p => p.name.toLowerCase()));
   for (const project of candidates.filter(p => !known.has(p.name.toLowerCase())).slice(0, 8)) {
     const card = element('article', null, 'project-candidate');
+    card.dataset.focusKey = `project-candidate:${project.name}`;
     card.append(element('span', 'PROJECT GROUP DETECTED', 'eyebrow'), element('h3', project.name),
       element('p', `${project.count} loose files share this name. ${project.destinations.length ? 'Matching existing folders found.' : 'Give them a project folder.'}`),
       element('small', project.examples.join(' · '), 'quiet'));
@@ -170,7 +209,7 @@ $('scan-laptop').addEventListener('click', async () => {
       row.append(input, copy);
       list.append(row);
     }
-    $('locations-dialog').showModal();
+    openDialog($('locations-dialog'));
   } catch (error) { $('file-feedback').textContent = error.message; }
 });
 $('locations-all').addEventListener('change', () => {
@@ -198,7 +237,7 @@ function chooseSortDestination(suggestion) {
   $('destination-folder').value = suggestion.destination_folder || '';
   $('destination-source').textContent = sortFolderPath({path:suggestion.source_root_path}, suggestion.source_relative);
   $('destination-feedback').textContent = '';
-  $('sort-destination-dialog').showModal();
+  openDialog($('sort-destination-dialog'));
 }
 $('destination-cancel').addEventListener('click', () => $('sort-destination-dialog').close());
 $('destination-confirm').addEventListener('click', async () => {

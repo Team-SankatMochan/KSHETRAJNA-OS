@@ -37,7 +37,7 @@ function requestSortApproval(title, message) {
   if (pendingSortApproval) finishSortApproval(false);
   $('sort-confirm-title').textContent = title;
   $('sort-confirm-copy').textContent = message;
-  dialog.showModal();
+  openDialog(dialog);
   return new Promise(resolve => {pendingSortApproval = resolve;});
 }
 let pendingRootApproval = null;
@@ -60,14 +60,14 @@ function requestRootApproval(path, label) {
   if (!dialog || typeof dialog.showModal !== 'function') {
     return Promise.resolve(window.confirm(
       `Approve Kshetrajna to inspect ${label || 'this folder'}?\n\n` +
-      `It reads bounded local metadata and allowed text excerpts only; it does not move or delete files while scanning.\n\n${path}`
+       `It reads bounded local metadata and allowed text, Office and PDF excerpts. Excerpts can be stored locally. No files move or are deleted during scanning.\n\n${path}`
     ));
   }
   if (pendingRootApproval) finishRootApproval(false);
   $('file-permission-label').textContent = label || 'Selected folder';
   $('file-permission-path').textContent = path;
   $('file-permission-copy').textContent = `Before indexing ${label || 'this folder'}, choose whether Kshetrajna may inspect it locally.`;
-  dialog.showModal();
+  openDialog(dialog);
   return new Promise(resolve => { pendingRootApproval = { resolve }; });
 }
 
@@ -228,10 +228,12 @@ async function refreshFiles() {
       request('/api/files/insights'), request('/api/files/actions'),
     ]);
     if (sortBusy || revision !== filesRevision) return;
-    renderFiles(state);
-    renderKnownFolders(knownFolders.folders || [], state.roots || []);
-    renderInsights(insights);
-    renderActionJournal(actions.actions || []);
+    preserveFocus(() => {
+      renderFiles(state);
+      renderKnownFolders(knownFolders.folders || [], state.roots || []);
+      renderInsights(insights);
+      renderActionJournal(actions.actions || []);
+    });
     const summaries = state.sort_plans || [];
     const selectedSortValue = $('sort-root').value;
     const selectedReadyIds = state.roots.filter(root => ['ready', 'truncated'].includes(root.status)).map(root => root.id).sort((a, b) => a - b);
@@ -264,7 +266,8 @@ async function refreshFiles() {
     }
     renderSortPlan(currentSortPlan);
   } catch (error) {
-    $('file-feedback').textContent = `Could not refresh files: ${error.message}. Check that the local app is running.`;
+    const message = `Could not refresh files: ${error.message}. Check that the local app is running.`;
+    if ($('file-feedback').textContent !== message) $('file-feedback').textContent = message;
     const summary = $('sort-scope-summary');
     const status = summary?.querySelector('.sort-scope-status');
     if (status) {
@@ -292,6 +295,7 @@ function renderKnownFolders(folders, roots) {
     const match = roots.find(root => normalize(root.path) === normalize(folder.path));
     const covered = roots.find(root => normalize(folder.path).startsWith(normalize(root.path) + '/'));
     const row = element('div', null, 'known-folder');
+    row.dataset.focusKey = `known-folder:${folder.path}`;
     const details = element('div');
     details.append(element('strong', folder.label), element('small', folder.path, 'root-path'));
     const action = button(covered ? 'Covered by approved folder' : match ? 'Rescan folder' : 'Approve and scan', async () => {
@@ -323,6 +327,7 @@ function renderFiles(state) {
   } else {
     for (const root of state.roots) {
       const item = element('div', null, 'root-item');
+      item.dataset.focusKey = `root:${root.id}`;
       
       const info = element('div', null, 'root-info');
       const label = element('strong', root.label || 'Unnamed');
@@ -404,6 +409,10 @@ function renderFiles(state) {
 }
 
 function renderSortPlan(plan) {
+  return preserveFocus(() => renderSortPlanContent(plan));
+}
+
+function renderSortPlanContent(plan) {
   const signature = JSON.stringify([plan, $('sort-root').value, currentFilesState?.mode, $('sort-filter')?.value]);
   if (signature === sortRenderSignature) return;
   sortRenderSignature = signature;
@@ -506,6 +515,7 @@ function renderSortPlan(plan) {
     const movable = group.items.filter(suggestion => suggestion.status === 'suggested');
     const blocked = group.items.filter(suggestion => suggestion.status === 'blocked');
     const card = element('article', null, `sort-conversation${blocked.length && !movable.length ? ' blocked' : ''}`);
+    card.dataset.focusKey = `sort-group:${group.rootPath}:${group.folder}`;
     const noun = group.items.length === 1 ? 'this file' : 'these files';
     const destination = group.folder ? sortFolderPath({path:group.rootPath}, group.folder) : group.rootPath;
     const cardHeading = element('div', null, 'sort-card-heading');
@@ -523,6 +533,7 @@ function renderSortPlan(plan) {
     fileList.className = 'sort-conversation-files';
     for (const suggestion of group.items) {
       const item = document.createElement('li');
+      item.dataset.focusKey = `suggestion:${suggestion.id}`;
       const sourcePath = sortFolderPath({path:suggestion.source_root_path || plan.root_path}, suggestion.source_relative);
       const sourceBlock = element('div', null, 'sort-source-block');
       sourceBlock.append(element('span', `FROM ${rootDisplayName({path: suggestion.source_root_path || plan.root_path})}`, 'sort-path-label'), element('span', suggestion.source_relative, 'sort-source-name'), element('code', sourcePath, 'sort-source-path'));
@@ -630,12 +641,13 @@ async function autoSortClearMatches() {
   const destinations = sortGroups({...currentSortPlan, suggestions:currentSortPlan.suggestions.filter(s => s.automation_eligible).slice(0,count)}).map(group => `${sortFolderPath({path:group.rootPath}, group.folder)}: ${group.items.length} files`).join('\n');
   const approvalRevision = filesRevision;
   const approvalScope = sortScopeFingerprint();
+  const approvedPlanId = currentSortPlan.id;
   setSortScopeControlsDisabled(true);
   if (!await requestSortApproval(`Auto-sort ${count} clear matches?`, `${root.path}\n\n${destinations}\n\nOnly loose files with clear destinations move. Folders are created as needed. Ambiguous files stay untouched; nothing is deleted. Eligible moves can be undone.`)) {
     setSortScopeControlsDisabled(false);
     return;
   }
-  if (approvalRevision !== filesRevision || approvalScope !== sortScopeFingerprint()) {
+  if (approvalRevision !== filesRevision || approvalScope !== sortScopeFingerprint() || currentSortPlan?.id !== approvedPlanId) {
     setSortScopeControlsDisabled(false);
     $('sort-feedback').textContent = 'The scope changed while approval was open. No files were moved; preview again.';
     return;
@@ -644,7 +656,7 @@ async function autoSortClearMatches() {
   $('sort-auto').disabled = true;
   $('sort-generate').disabled = true;
   try {
-    const result = await post('/api/files/sort/auto', {plan_id: currentSortPlan.id, confirm: true});
+    const result = await post('/api/files/sort/auto', {plan_id: approvedPlanId, confirm: true});
     currentSortPlan = result.plan;
     renderSortPlan(currentSortPlan);
     $('sort-feedback').textContent = `Sorted ${result.applied.length} files. ${result.failed.length} could not move; ${result.plan.review_count} need your advice. Undo is available.`;
@@ -660,6 +672,7 @@ async function autoSortClearMatches() {
 
 async function applySortPlan(selectedIds = null) {
   if (!currentSortPlan || sortBusy) return;
+  const approvedPlanId = currentSortPlan.id;
   const chosen = new Set(selectedIds || currentSortPlan.suggestions.map(suggestion => suggestion.id));
   const chosenSuggestions = currentSortPlan.suggestions.filter(suggestion => chosen.has(suggestion.id));
   if (!chosenSuggestions.length) return;
@@ -675,7 +688,7 @@ async function applySortPlan(selectedIds = null) {
     setSortScopeControlsDisabled(false);
     return;
   }
-  if (approvalRevision !== filesRevision || approvalScope !== sortScopeFingerprint()) {
+  if (approvalRevision !== filesRevision || approvalScope !== sortScopeFingerprint() || currentSortPlan?.id !== approvedPlanId) {
     setSortScopeControlsDisabled(false);
     $('sort-feedback').textContent = 'The scope changed while approval was open. No files were moved; preview again.';
     return;
@@ -684,13 +697,13 @@ async function applySortPlan(selectedIds = null) {
   filesRevision += 1;
   try {
     const result = await post('/api/files/sort/approve-idea', {
-      plan_id: currentSortPlan.id,
+      plan_id: approvedPlanId,
       suggestion_ids: chosenSuggestions.map(s => s.id),
       confirm: true,
     });
     currentSortPlan = result.plan;
     renderSortPlan(currentSortPlan);
-    $('sort-feedback').textContent = `Sort AI finished: ${result.applied.length} applied, ${result.failed.length} failed. Original files were not deleted.`;
+    $('sort-feedback').textContent = `Sort review finished: ${result.applied.length} moved, ${result.failed.length} failed. Inspect exact outcomes; eligible moves can be undone.`;
   } catch (error) {
     $('sort-feedback').textContent = error.message;
     $('sort-feedback').style.color = '#f0aaa0';
@@ -703,15 +716,17 @@ async function applySortPlan(selectedIds = null) {
 
 async function undoSortPlan() {
   if (!currentSortPlan || sortBusy) return;
+  const approvedPlanId = currentSortPlan.id;
   setSortScopeControlsDisabled(true);
   if (!await requestSortApproval('Undo this sorting batch?', 'Restore eligible file moves to their original locations. Paths that changed will not be overwritten.')) {
     setSortScopeControlsDisabled(false);
     return;
   }
+  if (currentSortPlan?.id !== approvedPlanId) { setSortScopeControlsDisabled(false); $('sort-feedback').textContent = 'The batch changed during review. Review it again before undo.'; return; }
   sortBusy = true;
   filesRevision += 1;
   try {
-    const result = await post('/api/files/sort/undo', { plan_id: currentSortPlan.id, confirm: true });
+    const result = await post('/api/files/sort/undo', { plan_id: approvedPlanId, confirm: true });
     currentSortPlan = result.plan;
     renderSortPlan(currentSortPlan);
     $('sort-feedback').textContent = `Sort AI undo: ${result.rolled_back.length} restored, ${result.failed.length} need review.`;
@@ -768,13 +783,14 @@ function renderInsights(insights) {
   reviews.replaceChildren();
   const decisions = (insights.file_decisions || insights.review_candidates || []).slice(0, 20);
   if (!decisions.length) {
-    reviews.append(element('p', 'No indexed files are available for an automatic decision yet.', 'empty'));
+    reviews.append(element('p', 'No indexed files are available for a suggested next step yet.', 'empty'));
   } else {
     for (const file of decisions) {
       const card = element('article', null, 'file-review-card');
+      card.dataset.focusKey = `file-review:${file.file_id}`;
       const evidence = (file.decision_evidence || []).slice(0, 2).join(' ');
       card.append(
-        element('strong', `Automatic decision: ${file.recommended_action_label || 'Review this file'}`),
+        element('strong', `Suggested next step: ${file.recommended_action_label || 'Review this file'}`),
         element('span', file.name),
         element('code', file.path),
         element('p', file.decision_summary || file.review_reason || 'No extra action is recommended.', file.review_required ? 'sort-warning' : 'sort-content-summary'),
@@ -930,7 +946,7 @@ async function openFileReview(fileId) {
       $('file-review-summary').textContent = 'Opening the PDF inside this preview…';
     }
     $('file-review-metadata').textContent = `${bytes(file.size_bytes)} · ${file.extension ? file.extension.toUpperCase() : 'file'} · modified ${timeLabel(file.modified_at)}`;
-    if (!$('file-review-dialog').open) $('file-review-dialog').showModal();
+    if (!$('file-review-dialog').open) openDialog($('file-review-dialog'));
     if (file.image_preview_url) await loadFileReviewImage(file, requestId, signal);
     if (file.pdf_preview_url) await loadFileReviewPdf(file, requestId, signal);
   } catch (error) {
@@ -955,8 +971,8 @@ function closeFileReviewAndChooseAction() {
   if (dialog?.open) dialog.close();
   if (!pendingFileReview) return;
   const { file, detail } = pendingFileReview;
-  $('file-review-action-copy').textContent = `${file.name}\nAutomatic decision: ${file.insights?.recommended_action_label || 'Review manually'}\n${file.insights?.review_reason || detail.excerpt || 'Review the file manually before deciding.'}\n\nRecommendation: ${file.insights?.review_recommendation || 'Keep it unless you have a separate reason to move or delete it.'}`;
-  $('file-review-action-dialog').showModal();
+  $('file-review-action-copy').textContent = `${file.name}\nSuggested next step: ${file.insights?.recommended_action_label || 'Review manually'}\n${file.insights?.review_reason || detail.excerpt || 'Review the file manually before deciding.'}\n\nRecommendation: ${file.insights?.review_recommendation || 'Keep it unless you have a separate reason to move or delete it.'}`;
+  openDialog($('file-review-action-dialog'));
 }
 
 function finishFileReviewDecision(decision) {
@@ -970,6 +986,7 @@ function finishFileReviewDecision(decision) {
   } else if (decision === 'move') {
     proposeFileAction(review.file, 'MOVE');
   } else if (decision === 'delete') {
+    if (!permanentDeleteAvailable()) { setFeedback('Permanent deletion requires a supported, separately enabled Expert capability.', true); return; }
     proposeFileAction(review.file, 'DELETE');
   }
 }
@@ -983,23 +1000,17 @@ async function useAutomaticFileDecision() {
     return;
   }
   if (action === 'cleanup') {
-    finishFileReviewDecision('delete');
+    finishFileReviewDecision('keep');
+    location.hash = 'cleanup';
+    setFeedback('No file was deleted. Review eligible zero-byte or duplicate candidates for recoverable quarantine. A recommendation is not proof a file is disposable.');
     return;
   }
   if (!['organize', 'archive'].includes(action)) {
     finishFileReviewDecision('keep');
     return;
   }
-  const dialog = $('file-review-action-dialog');
-  if (dialog?.open) dialog.close();
-  try {
-    const result = await post('/api/files/organize', { file_id: review.file.id, confirm: true });
-    pendingFileReview = null;
-    setFeedback(`Automatic decision applied: ${result.applied?.length || 0} file action(s) recorded.`);
-    await refreshFiles();
-  } catch (error) {
-    setFeedback(`Automatic organization failed: ${error.message}`, true);
-  }
+  // A recommendation alone does not approve an unseen destination.
+  finishFileReviewDecision('move');
 }
 
 async function mutateFile(path, payload, message) {
@@ -1027,8 +1038,8 @@ $('add-root-form').addEventListener('submit', async (e) => {
 });
 
 $('delete-files-button').addEventListener('click', async () => {
-  if (confirm('Delete all file intelligence data? This will not delete original files.')) {
-    await mutateFile('/api/files/delete-all', {confirm: true}, 'All file data deleted.');
+  if (confirm('Erase the file index and stored excerpts? Original files are not deleted. Unresolved recovery data may be retained; this does not erase exported reports or backups.')) {
+    await mutateFile('/api/files/delete-all', {confirm: true}, 'File-index erasure completed. Original files are unchanged; necessary unresolved recovery records may remain.');
   }
 });
 
@@ -1121,6 +1132,7 @@ $('sort-history').addEventListener('change', async () => {
     currentSortPlan = await request('/api/files/sort/plan/' + encodeURIComponent(id));
     if ([...$('sort-root').options].some(option => Number(option.value) === currentSortPlan.root_id)) $('sort-root').value = String(currentSortPlan.root_id);
     renderSortPlan(currentSortPlan);
+    location.hash = 'sort-ai';
   } catch (error) {
     $('sort-feedback').textContent = error.message;
   } finally {
@@ -1140,14 +1152,26 @@ $('file-review-image-zoom').addEventListener('click', () => {
 });
 $('file-review-dialog').addEventListener('cancel', event => {
   event.preventDefault();
-  closeFileReviewAndChooseAction();
+  releaseFilePreview();
+  pendingFileReview = null;
+  $('file-review-dialog').close();
 });
+const cancelFilePreview = button('Cancel preview', () => {
+  releaseFilePreview(); pendingFileReview = null; $('file-review-dialog').close();
+}, 'secondary');
+cancelFilePreview.dataset.dialogCancel = '';
+$('file-review-close').parentElement.append(cancelFilePreview);
+const cancelFileDecision = button('Cancel', () => { pendingFileReview = null; $('file-review-action-dialog').close(); }, 'secondary');
+cancelFileDecision.dataset.dialogCancel = '';
+$('file-review-auto').parentElement.append(cancelFileDecision);
+$('file-review-action-dialog').addEventListener('cancel', () => { pendingFileReview = null; });
 $('file-review-keep').addEventListener('click', () => finishFileReviewDecision('keep'));
 $('file-review-move').addEventListener('click', () => finishFileReviewDecision('move'));
 $('file-review-delete').addEventListener('click', () => finishFileReviewDecision('delete'));
 $('file-review-auto').addEventListener('click', useAutomaticFileDecision);
 
 async function proposeFileAction(file, kind) {
+  if (kind === 'DELETE' && !permanentDeleteAvailable()) { setFeedback('Permanent deletion is unavailable without a supported Expert opt-in.', true); return; }
   if (kind === 'DELETE' && !window.confirm(`Permanently delete ${file.name}? This cannot be undone by Kshetrajna.`)) return;
   const promptText = kind === 'RENAME'
     ? `New filename for ${file.name} (the extension must stay the same):`
@@ -1174,6 +1198,7 @@ async function proposeFileAction(file, kind) {
       await refreshFiles();
       return;
     }
+    if (kind === 'DELETE' && !permanentDeleteAvailable()) { setFeedback('Permanent deletion permission changed. Nothing was applied.', true); return; }
     const result = await post('/api/files/actions/apply', {
       proposal_id: proposal.proposal_id,
       confirm: true,
@@ -1196,6 +1221,7 @@ function renderActionJournal(actions) {
   }
   for (const action of actions.slice(0, 10)) {
     const entry = element('article', null, 'file-action-entry');
+    entry.dataset.focusKey = `file-action:${action.proposal_id || action.id}`;
     const status = action.status.replaceAll('_', ' ').toUpperCase();
     entry.append(
       element('span', status, 'eyebrow'),
@@ -1203,9 +1229,12 @@ function renderActionJournal(actions) {
       element('small', action.error || `Created ${timeLabel(action.created_at)}`),
     );
     const controls = element('div', null, 'control-actions');
-    if (action.status === 'proposed') {
+    if (action.status === 'proposed' && (action.kind !== 'DELETE' || permanentDeleteAvailable())) {
       controls.append(
         button('Apply', async () => {
+          if (action.kind === 'DELETE' && !permanentDeleteAvailable()) return;
+          if (!await requestSortApproval(action.kind === 'DELETE' ? 'Permanently delete this file?' : 'Apply this exact file action?', `${action.kind}: ${action.source_relative} → ${action.destination_relative}\n\n${action.kind === 'DELETE' ? 'Permanent deletion cannot be undone.' : 'No overwriting. Undo is available only if current file state allows it.'}`)) return;
+          if (action.kind === 'DELETE' && !permanentDeleteAvailable()) { setFeedback('Permanent deletion permission changed. Nothing was applied.', true); return; }
           try {
             const result = await post('/api/files/actions/apply', {
               proposal_id: action.proposal_id,
@@ -1226,6 +1255,7 @@ function renderActionJournal(actions) {
       );
     } else if (action.status === 'applied') {
       controls.append(button('Undo', async () => {
+        if (!await requestSortApproval('Undo this exact file action?', `${action.source_relative} ← ${action.destination_relative}\n\nRestore the original path only if file state allows it. A newer file will not be overwritten.`)) return;
         try {
           const result = await post('/api/files/actions/undo', { action_id: action.id, confirm: true });
           if (result.status !== 'rolled_back') throw new Error(result.message || 'The file action could not be undone.');
@@ -1265,6 +1295,7 @@ let pendingQuarantineRestore = null;
 let quarantineRestoreReturnFocus = null;
 
 function fmtBytes(n) {
+  if (n == null) return 'Unavailable';
   const size = Number(n);
   if (!Number.isFinite(size) || size < 0) return 'Unknown size';
   if (size === 0) return '0 B';
@@ -1365,7 +1396,7 @@ function renderCleanupSummary() {
   const duplicateCopies = cleanupData.duplicates
     ? (cleanupData.duplicates.groups || []).reduce((total, group) => total + Number(group.count || group.files?.length || 0), 0)
     : '—';
-  const wasted = cleanupData.duplicates ? fmtBytes(cleanupData.duplicates.total_wasted_bytes || 0) : '—';
+  const wasted = cleanupData.duplicates ? fmtBytes(cleanupData.duplicates.total_wasted_bytes) : '—';
   summary.replaceChildren();
   for (const [value, label, className] of [
     [info.indexedFiles.toLocaleString(), 'indexed files in scope', 'cleanup-indexed'],
@@ -1373,7 +1404,7 @@ function renderCleanupSummary() {
     ['0 B', 'zero-byte bytes', 'cleanup-wasted'],
     [String(duplicateGroups), 'exact duplicate groups', 'cleanup-candidate'],
     [String(duplicateCopies), 'copies in returned groups', 'cleanup-candidate'],
-    [wasted, 'duplicate bytes wasted', 'cleanup-wasted'],
+    [wasted, 'potential duplicate storage · retained in quarantine', 'cleanup-wasted'],
   ]) {
     const card = element('div', null, className);
     card.append(element('strong', value), element('small', label));
@@ -1413,7 +1444,7 @@ function syncCleanupControls(state = currentFilesState) {
   document.querySelectorAll('#cleanup .cleanup-action-button').forEach(control => {
     control.disabled = disabled;
   });
-  document.querySelectorAll('#cleanup .quarantine-restore-button').forEach(control => {
+  document.querySelectorAll('#cleanup-recovery-list .quarantine-restore-button').forEach(control => {
     control.disabled = disabled || quarantineListStale;
   });
   const recoveryRefresh = $('cleanup-recovery-refresh');
@@ -1464,7 +1495,7 @@ function requestCleanupApproval(kind, file, detail) {
     element('code', path),
   );
   $('cleanup-confirm-mode').textContent = 'The reviewed file moves into app-managed quarantine. Restore is available while its recovery record remains unresolved; any final purge semantics are controlled by the backend.';
-  dialog.showModal();
+  openDialog(dialog);
   $('cleanup-confirm-cancel')?.focus();
   return new Promise(resolve => { pendingCleanupApproval = resolve; });
 }
@@ -1480,6 +1511,10 @@ function cleanupStatusText(info, count, noun) {
 }
 
 function renderEmptyList(files) {
+  return preserveFocus(() => renderEmptyListContent(files));
+}
+
+function renderEmptyListContent(files) {
   const list = $('cleanup-empty-list');
   list.replaceChildren();
   list.setAttribute('aria-busy', 'false');
@@ -1492,6 +1527,7 @@ function renderEmptyList(files) {
   for (const file of files) {
     const entry = element('article', null, 'file-action-entry');
     entry.dataset.kind = 'empty';
+    entry.dataset.focusKey = `empty-file:${file.id}`;
     const path = cleanupExactPath(file);
     entry.append(
       element('span', 'ZERO-BYTE CANDIDATE', 'eyebrow'),
@@ -1515,6 +1551,10 @@ function renderEmptyList(files) {
 }
 
 function renderDuplicateGroups(data) {
+  return preserveFocus(() => renderDuplicateGroupsContent(data));
+}
+
+function renderDuplicateGroupsContent(data) {
   const list = $('cleanup-dup-list');
   const summary = $('cleanup-dup-summary');
   const groups = Array.isArray(data?.groups) ? data.groups : [];
@@ -1527,7 +1567,7 @@ function renderDuplicateGroups(data) {
     stats.append(
       element('span', `${Number(data?.total_groups || 0).toLocaleString()} exact SHA-256 group${Number(data?.total_groups || 0) === 1 ? '' : 's'}`, 'pill'),
       element('span', `${copies.toLocaleString()} copies in returned groups`, 'pill'),
-      element('span', `${fmtBytes(data?.total_wasted_bytes || 0)} duplicate bytes`, 'pill'),
+      element('span', `${fmtBytes(data?.total_wasted_bytes)} potential duplicate storage`, 'pill'),
       ...(data?.scan_partial ? [element('span', 'PARTIAL CATALOG PREVIEW', 'pill cleanup-warning')] : []),
       ...(data?.hash_skipped_files ? [element('span', `${Number(data.hash_skipped_files).toLocaleString()} files not hashable in the bounded pass`, 'pill cleanup-warning')] : []),
       ...(data?.groups_truncated ? [element('span', 'FIRST 100 GROUPS SHOWN', 'pill cleanup-warning')] : []),
@@ -1542,6 +1582,7 @@ function renderDuplicateGroups(data) {
   }
   for (const group of groups) {
     const groupElement = element('section', null, 'cleanup-group');
+    groupElement.dataset.focusKey = `duplicate-group:${group.sha256}`;
     const heading = element('div', null, 'cleanup-group-heading');
     const headingCopy = element('div');
     headingCopy.append(
@@ -1556,6 +1597,7 @@ function renderDuplicateGroups(data) {
       const isKeep = index === files.length - 1;
       const entry = element('article', null, 'file-action-entry');
       entry.dataset.kind = 'duplicate';
+      entry.dataset.focusKey = `duplicate-file:${file.id}`;
       const path = cleanupExactPath(file);
       entry.append(
         element('span', isKeep ? 'KEEP · LAST COPY IN THIS REVIEW' : 'EXACT SHA-256 DUPLICATE', `eyebrow${isKeep ? ' cleanup-keep' : ''}`),
@@ -1594,7 +1636,7 @@ async function refreshCleanupList(kind) {
   } else {
     cleanupData.duplicates = data;
     renderDuplicateGroups(data);
-    if (status) status.textContent = `${Number(data.total_groups || 0).toLocaleString()} group${Number(data.total_groups || 0) === 1 ? '' : 's'} · ${fmtBytes(data.total_wasted_bytes || 0)} wasted${cleanupScopeStatus(info)[0] === 'partial' || data.scan_partial ? ' · PARTIAL' : ''}`;
+    if (status) status.textContent = `${Number(data.total_groups || 0).toLocaleString()} group${Number(data.total_groups || 0) === 1 ? '' : 's'} · ${fmtBytes(data.total_wasted_bytes)} potential duplicate storage${cleanupScopeStatus(info)[0] === 'partial' || data.scan_partial ? ' · PARTIAL' : ''}`;
   }
   renderCleanupSummary();
   return data;
@@ -1652,8 +1694,8 @@ function classifyQuarantineRestoreError(error) {
     };
   }
   return {
-    state: 'restore_failed',
-    message: 'Restore could not complete. The file remains in quarantine; refresh the recovery list and try again when the location is ready.',
+    state: 'unknown',
+    message: 'Restore outcome is unconfirmed. Do not assume the file is still quarantined or retry blindly. Refresh recovery and inspect the original path before another approval.',
   };
 }
 
@@ -1681,11 +1723,18 @@ function quarantineStatusText(items) {
 }
 
 function renderQuarantineItems(data, staleMessage = '') {
+  return preserveFocus(() => renderQuarantineItemsContent(data, staleMessage));
+}
+
+function renderQuarantineItemsContent(data, staleMessage = '') {
   const list = $('cleanup-recovery-list');
   const status = $('cleanup-recovery-status');
   if (!list) return;
   const normalized = quarantineListFromResponse(data);
   const items = normalized.items;
+  const signature = JSON.stringify([normalized, staleMessage, [...quarantineIssues]]);
+  if (list.dataset.signature === signature) { list.setAttribute('aria-busy', 'false'); return; }
+  list.dataset.signature = signature;
   list.replaceChildren();
   list.setAttribute('aria-busy', 'false');
   if (status) {
@@ -1706,6 +1755,7 @@ function renderQuarantineItems(data, staleMessage = '') {
     const issue = quarantineIssueFor(actionId);
     const visualState = issue?.state || baseState;
     const card = element('article', null, 'quarantine-card');
+    card.dataset.focusKey = `quarantine:${actionId}`;
     card.dataset.state = visualState;
     const heading = element('div', null, 'quarantine-card-heading');
     heading.append(
@@ -1762,11 +1812,11 @@ async function refreshQuarantineList() {
   const status = $('cleanup-recovery-status');
   if (!list) return null;
   const requestVersion = ++quarantineRequestVersion;
-  quarantineBusy = true;
+  quarantineBusy = !quarantineData;
   syncCleanupControls();
   list.setAttribute('aria-busy', 'true');
   if (!quarantineData) list.replaceChildren(element('p', 'Loading recovery records…', 'cleanup-loading'));
-  if (status) {
+  if (status && !quarantineData) {
     status.textContent = 'LOADING…';
     status.dataset.state = 'loading';
   }
@@ -1777,9 +1827,10 @@ async function refreshQuarantineList() {
     quarantineListStale = false;
     // A successful refresh is authoritative for records that still exist.
     const visibleItems = new Map(quarantineData.items.map(item => [String(item.action_id || ''), item]));
-    quarantineIssues = new Map([...quarantineIssues].filter(([id]) => {
+    quarantineIssues = new Map([...quarantineIssues].filter(([id, issue]) => {
       const item = visibleItems.get(id);
-      return item && quarantineState(item) !== 'restored';
+      return item && quarantineState(item) !== 'restored'
+        && !(issue.state === 'unknown' && quarantineState(item) === 'quarantined');
     }));
     renderQuarantineItems(quarantineData);
     return response;
@@ -1843,7 +1894,7 @@ function openQuarantineRestore(item, trigger) {
   $('quarantine-restore-feedback').style.color = '';
   $('quarantine-restore-check').checked = false;
   $('quarantine-restore-confirm').disabled = true;
-  dialog.showModal();
+  openDialog(dialog);
   $('quarantine-restore-check').focus();
 }
 
@@ -1885,6 +1936,7 @@ async function restoreQuarantinedFile() {
   } catch (error) {
     const issue = classifyQuarantineRestoreError(error);
     quarantineIssues.set(actionId, issue);
+    if (issue.state === 'unknown') quarantineListStale = true;
     $('quarantine-restore-feedback').textContent = issue.message;
     $('quarantine-restore-feedback').style.color = '#ffb4ad';
     if (confirmButton) confirmButton.disabled = !check.checked;
@@ -1921,7 +1973,7 @@ async function scanCleanup(kind) {
   setCleanupFeedback('');
   try {
     await refreshCleanupList(kind);
-    setCleanupFeedback(isEmpty ? 'Zero-byte scan complete. Review each exact path before deletion.' : 'Duplicate scan complete. Only identical SHA-256 content is grouped.');
+    setCleanupFeedback(isEmpty ? 'Zero-byte scan complete. Review each exact path before quarantine; zero-byte files offer no content-byte savings.' : 'Duplicate scan complete. Identical SHA-256 content is grouped; quarantine retains those bytes.');
   } catch (error) {
     cleanupError(list, `Cleanup scan failed: ${error.message}. No file was changed.`);
     if (status) status.textContent = 'SCAN ERROR';

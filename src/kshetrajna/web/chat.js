@@ -89,6 +89,8 @@ function showChatActions(container, actions) {
     const card = document.createElement('article');
     card.className = 'chat-action-card';
     card.dataset.chatActionKind = action.type;
+    card.dataset.focusKey = `chat-action:${action.offer_id || action.pid || action.type}`;
+    if (action.action === 'trim_memory' || String(action.offer_id || '').startsWith('memory:')) card.dataset.expert = '';
     card.append(element('strong', action.title));
     if (action.description) card.append(element('p', action.description));
     if (action.type === 'navigate') {
@@ -101,6 +103,7 @@ function showChatActions(container, actions) {
       card.append(review);
       if (action.type === 'process') {
         const force = button('Force terminate', () => reviewChatAction(action, 'terminate'), 'danger text-button');
+        force.dataset.expert = '';
         force.disabled = !action.enabled;
         card.append(force);
       }
@@ -157,12 +160,14 @@ async function sendChatMessage(message) {
 }
 
 async function reviewChatAction(action, kind) {
+  if ((kind === 'terminate' || action.action === 'trim_memory' || String(action.offer_id || '').startsWith('memory:')) && !expertView()) return;
   try {
     const result = action.type === 'process'
       ? await post('/api/processes/preview', {pid: action.pid, action: kind})
       : await post('/api/maintenance/preview', {id: action.offer_id});
     chatPlan = {plan: result.plan, type: action.type};
     const plan = result.plan;
+    if (['trim_memory', 'terminate'].includes(plan.action) && !expertView()) { chatPlan = null; chatFeedback('This advanced action is hidden in Basic view. No change was made.'); return; }
     $('chat-action-title').textContent = plan.title;
     $('chat-action-effect').textContent = plan.effect;
     $('chat-action-undo').textContent = plan.undo;
@@ -173,7 +178,7 @@ async function reviewChatAction(action, kind) {
     const candidates = $('chat-action-candidates'); candidates.replaceChildren();
     candidates.hidden = !plan.candidates?.length;
     for (const candidate of plan.candidates || []) candidates.append(element('small', `${candidate.relative_path} · ${bytes(candidate.size_bytes)}`));
-    $('chat-action-dialog').showModal();
+    openDialog($('chat-action-dialog'));
   } catch (error) { chatFeedback(error.message, true); }
 }
 
@@ -208,7 +213,7 @@ $('chat-clear').addEventListener('click', async () => {
 $('chat-action-cancel').addEventListener('click', () => { chatPlan = null; $('chat-action-dialog').close(); });
 $('chat-action-dialog').addEventListener('cancel', () => { chatPlan = null; });
 $('chat-action-confirm').addEventListener('click', async () => {
-  if (!chatPlan) return;
+  if (!chatPlan || (['trim_memory', 'terminate'].includes(chatPlan.plan.action) && !expertView())) return;
   $('chat-action-confirm').disabled = true;
   try {
     const result = chatPlan.type === 'process'
