@@ -27,7 +27,7 @@ def crash_child(base, boundary):
     """Internal subprocess entry; the parent owns and removes this fixture."""
     store = FileStore(base / "catalog.db")
     service = FileService(store)
-    root_id = service.add_root(str(base / "root"), "Disposable crash fixture")["id"]
+    root_id = service.add_root(str(base / "root"), "Disposable crash fixture", consent=True)["id"]
     if wait_for_scan(service, root_id, WAIT)["status"] != "ready":
         raise RuntimeError("fixture scan failed")
     matches = service.search("victim.bin", root_id)["results"]

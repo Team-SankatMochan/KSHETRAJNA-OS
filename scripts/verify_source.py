@@ -182,8 +182,12 @@ def main(argv=None):
         child_command = [sys.executable, "-B", str(Path(__file__).resolve()), "--_unittest-worker"]
         for pattern in patterns:
             child_command.extend(["--pattern", pattern])
+        # sys.path changes in the worker do not reach its subprocesses. Pin their
+        # source imports too, without changing the parent or trusting caller paths.
+        worker_env = os.environ.copy()
+        worker_env["PYTHONPATH"] = str(ROOT / "src")
         try:
-            child = run_process(child_command, timeout=args.timeout)
+            child = run_process(child_command, timeout=args.timeout, env=worker_env)
             tests = json.loads(child.stdout)
             if child.returncode or not isinstance(tests, dict):
                 if not isinstance(tests, dict):
